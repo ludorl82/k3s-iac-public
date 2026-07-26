@@ -1,0 +1,18 @@
+# local-path, not nfs-client: ntfy keeps auth.db + cache.db as SQLite, same
+# locking/corruption hazard over NFS that keeps n8n on local-path. local-path
+# bakes a nodeAffinity into the PV pinned to whichever node first provisioned
+# it — here that is deliberately `cloud-01` (see the Deployment's nodeSelector), so
+# the alerting stack keeps living on the cloud node and does not share fate
+# with the home network it is watching.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ntfy-data
+  namespace: ntfy
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi

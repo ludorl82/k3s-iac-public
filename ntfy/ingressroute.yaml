@@ -1,0 +1,42 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: ntfy
+spec:
+  redirectScheme:
+    permanent: true
+    scheme: https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: ntfy
+  namespace: ntfy
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`ntfy.lab.example`) || Host(`ntfy.pub.example.com`)
+      middlewares:
+        - name: redirect-to-https
+      services:
+        - name: ntfy
+          port: 80
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: ntfy-secure
+  namespace: ntfy
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`ntfy.lab.example`) || Host(`ntfy.pub.example.com`)
+      services:
+        - name: ntfy
+          port: 80
+  tls: {}

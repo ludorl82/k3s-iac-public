@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: dev-labodeludo-nfs-pv
+spec:
+  accessModes:
+    - ReadWriteMany
+  capacity:
+    storage: 5Gi
+  mountOptions:
+    - nfsvers=4.1
+  nfs:
+    # Dedicated subdirectory only - never point this at the bare export root.
+    # dev-labodeludo's deploy job does `rm -rf` on this mount; sharing the
+    # root with nfs-subdir-external-provisioner's other PVCs (netbox-media,
+    # numeriseur-sftpgo-data) wiped them out on 2026-07-19.
+    path: /k8s/dev-labodeludo-data
+    server: 192.0.2.65
+  persistentVolumeReclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dev-labodeludo-data
+  namespace: labodeludo
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: ""
+  volumeName: dev-labodeludo-nfs-pv

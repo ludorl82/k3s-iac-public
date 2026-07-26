@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n
+  namespace: n8n
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: n8n
+  template:
+    metadata:
+      labels:
+        app: n8n
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: n8n
+          image: docker.n8n.io/n8nio/n8n:latest
+          ports:
+            - containerPort: 5678
+              name: http
+          env:
+            - name: N8N_HOST
+              value: "n8n.pub.example.com"
+            - name: N8N_PORT
+              value: "5678"
+            - name: N8N_PROTOCOL
+              value: "https"
+            - name: N8N_EDITOR_BASE_URL
+              value: "https://n8n.pub.example.com/"
+            - name: WEBHOOK_URL
+              value: "https://n8n.pub.example.com/"
+            - name: N8N_SECURE_COOKIE
+              value: "false"
+            - name: GENERIC_TIMEZONE
+              value: "America/Toronto"
+            - name: N8N_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: n8n-secrets, key: encryption-key } }
+          volumeMounts:
+            - name: n8n-data
+              mountPath: /home/node/.n8n
+      volumes:
+        - name: n8n-data
+          persistentVolumeClaim:
+            claimName: n8n-data-nfs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: n8n
+  namespace: n8n
+spec:
+  type: ClusterIP
+  selector:
+    app: n8n
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5678

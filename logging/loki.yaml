@@ -1,0 +1,157 @@
+# Loki, migrated 2026-07-22 from the docker container on cloud-01 (~/loki-docker).
+# Storage is S3 (bucket loki-logs-example-com) so the migration is a
+# writer swap: stop the cloud-01 container (graceful stop flushes its WAL to S3),
+# start this one against the same bucket. The PVC only holds WAL/compactor
+# scratch + index cache, not log data.
+# Pinned to gpu-01 deliberately: amd64, 290G disk, 109G RAM, and it survived the
+# retirement of the vm-01 VM on 2026-07-24 (local-path PVCs pin the pod
+# to whichever node first schedules it anyway - better to choose explicitly).
+# In-cluster pushers use http://loki.logging.svc.cluster.local:3100; hosts
+# outside the cluster (currently the cloud-01 alloy container) push through the
+# web entrypoint at http://loki.lab.example (Cloudflare A -> cp-1, no TLS -
+# plain HTTP over the WG/VPC path, same exposure as the old :3100).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: logging
+data:
+  loki-config.yaml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+
+    common:
+      path_prefix: /loki
+      replication_factor: 1
+      storage:
+        s3:
+          bucketnames: loki-logs-example-com
+          region: ca-central-1
+          access_key_id: ${AWS_ACCESS_KEY_ID}
+          secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+          s3forcepathstyle: false
+      ring:
+        kvstore:
+          store: inmemory
+
+    schema_config:
+      configs:
+        - from: 2024-01-01
+          store: tsdb
+          object_store: s3
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+
+    limits_config:
+      max_global_streams_per_user: 20000
+      max_query_series: 20000
+      retention_period: 744h
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+
+    compactor:
+      working_directory: /loki/compactor
+      retention_enabled: true
+      delete_request_store: s3
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: loki-data-nfs
+  namespace: logging
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: logging
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+    spec:
+      containers:
+        - name: loki
+          image: grafana/loki:3.3.0
+          args:
+            - -config.file=/etc/loki/loki-config.yaml
+            - -config.expand-env=true
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: loki-s3, key: AWS_ACCESS_KEY_ID } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: loki-s3, key: AWS_SECRET_ACCESS_KEY } }
+          ports:
+            - { name: http, containerPort: 3100 }
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3100
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+              readOnly: true
+            - name: data
+              mountPath: /loki
+      volumes:
+        - name: config
+          configMap:
+            name: loki-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: loki-data-nfs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: logging
+spec:
+  selector:
+    app: loki
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3100
+---
+# Plain-HTTP ingress for out-of-cluster pushers (cloud-01 alloy). Deliberately no
+# HTTPS redirect: alloy pushes http and the path is internal (WG/VPC).
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: loki
+  namespace: logging
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`loki.lab.example`)
+      services:
+        - name: loki
+          port: 3100

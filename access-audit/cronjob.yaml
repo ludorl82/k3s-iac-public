@@ -1,0 +1,70 @@
+# Requires a Secret in this namespace, created out-of-band: cloudflare-access-audit-token
+# (key: token) - a dedicated, read-only Cloudflare API token scoped to Zone:DNS:Read +
+# Zone:Access Apps and Policies:Read on the pub.example.com zone only (KeePass "Cloudflare
+# Access Audit Token"). Deliberately not the shared "Cloudflare General Token" - see
+# the Cloudflare token scoping convention (dedicated least-privilege token per service).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cloudflare-access-gating-audit
+  namespace: access-audit
+spec:
+  schedule: "0 * * * *"
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: audit
+              image: alpine:3.20
+              command:
+                - sh
+                - -c
+                - |
+                  set -euo pipefail
+                  apk add --no-cache curl jq > /dev/null
+
+                  # Hostnames intentionally exposed via the Tunnel without Cloudflare
+                  # Access: plex.pub.example.com (own auth, geo-blocked via WAF instead) and
+                  # ntfy.pub.example.com (needs unauthenticated API access for push).
+                  EXCEPTIONS="plex.pub.example.com ntfy.pub.example.com"
+
+                  ZONE=$(curl -fsS -H "Authorization: Bearer $CF_TOKEN" \
+                    "https://api.cloudflare.com/client/v4/zones?name=pub.example.com" \
+                    | jq -r '.result[0].id')
+
+                  # Candidates: Tunnel-proxied hostnames in the zone (the only ones
+                  # Access can gate; plain A/AAAA records like cloud-01/cp-1 aren't
+                  # Tunnel-routed web services).
+                  CANDIDATES=$(curl -fsS -H "Authorization: Bearer $CF_TOKEN" \
+                    "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records?type=CNAME&per_page=100" \
+                    | jq -r '.result[] | select(.proxied==true and (.content|endswith("cfargotunnel.com"))) | .name')
+
+                  GATED=$(curl -fsS -H "Authorization: Bearer $CF_TOKEN" \
+                    "https://api.cloudflare.com/client/v4/zones/$ZONE/access/apps?per_page=100" \
+                    | jq -r '.result[].domain')
+
+                  MISSING=""
+                  CHECKED=0
+                  for h in $CANDIDATES; do
+                    case " $EXCEPTIONS " in *" $h "*) continue ;; esac
+                    CHECKED=$((CHECKED + 1))
+                    case "$GATED" in *"$h"*) ;; *) MISSING="$MISSING $h" ;; esac
+                  done
+
+                  PUSH_URL="https://kuma.lab.example/api/push/EXAMPLETOKEN"
+                  if [ -z "$MISSING" ]; then
+                    curl -fsSk -G "$PUSH_URL" \
+                      --data-urlencode "status=up" \
+                      --data-urlencode "msg=All $CHECKED pub.example.com hostnames Access-gated (2 exceptions skipped: plex, ntfy)"
+                  else
+                    curl -fsSk -G "$PUSH_URL" \
+                      --data-urlencode "status=down" \
+                      --data-urlencode "msg=Missing Cloudflare Access app for:${MISSING}"
+                    exit 1
+                  fi
+              env:
+                - name: CF_TOKEN
+                  valueFrom: { secretKeyRef: { name: cloudflare-access-audit-token, key: token } }

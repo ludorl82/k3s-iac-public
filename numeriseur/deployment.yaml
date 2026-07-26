@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: numeriseur-sftpgo
+  namespace: numeriseur
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: numeriseur-sftpgo
+  template:
+    metadata:
+      labels:
+        app: numeriseur-sftpgo
+    spec:
+      containers:
+        - name: sftpgo
+          image: ludorl82/numeriseur-sftpgo:latest
+          ports:
+            - containerPort: 2022
+              name: sftp
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: s3-credentials, key: AWS_ACCESS_KEY_ID } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: s3-credentials, key: AWS_SECRET_ACCESS_KEY } }
+            - name: AWS_REGION
+              valueFrom: { secretKeyRef: { name: s3-credentials, key: AWS_REGION } }
+            # Scans bucket. Not a secret, so it is a plain value rather than a
+            # secretKeyRef. This value is authoritative and overrides the
+            # image's built-in default.
+            #
+            # It used to be hardcoded in the image (users.json template and
+            # post-upload.sh), which is why the 2026-07-25 us-east-1 ->
+            # ca-central-1 migration needed an image rebuild to finish. The
+            # bucket was briefly renamed to numeriseur-scans-ca-example-com
+            # during that migration, because AWS held the old name for over
+            # half an hour after the delete; the old name was reclaimed once it
+            # freed up. Setting it here means the next move is a manifest
+            # change and a restart, nothing more.
+            - name: S3_BUCKET
+              value: numeriseur-scans-example-com
+            - name: LUDO_PASSWORD
+              valueFrom: { secretKeyRef: { name: sftp-user-passwords, key: ludo } }
+            - name: LEA_PASSWORD
+              valueFrom: { secretKeyRef: { name: sftp-user-passwords, key: lea } }
+            - name: LUDOETLEA_PASSWORD
+              valueFrom: { secretKeyRef: { name: sftp-user-passwords, key: ludoetlea } }
+            - name: PHOTOS_PASSWORD
+              valueFrom: { secretKeyRef: { name: sftp-user-passwords, key: photos } }
+            - name: CARTES_PASSWORD
+              valueFrom: { secretKeyRef: { name: sftp-user-passwords, key: cartes } }
+            - name: PRINTER_PUBLIC_KEY
+              valueFrom: { secretKeyRef: { name: printer-public-key, key: key } }
+            - name: RCLONE_CONFIG
+              value: /etc/rclone/rclone.conf
+          volumeMounts:
+            - name: sftpgo-data
+              mountPath: /var/lib/sftpgo
+            - name: sftpgo-tmp
+              mountPath: /var/lib/sftpgo/tmp
+            - name: rclone-config
+              mountPath: /etc/rclone
+              readOnly: true
+            - name: hostkeys
+              mountPath: /var/lib/sftpgo/host_keys
+      volumes:
+        - name: sftpgo-data
+          persistentVolumeClaim:
+            claimName: sftpgo-data
+        - name: sftpgo-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+        - name: rclone-config
+          secret:
+            secretName: rclone-config
+        - name: hostkeys
+          # SSH host key pair (id_rsa, id_rsa.pub, id_ed25519, id_ed25519.pub).
+          # Persisted here, not on sftpgo-data, so a data-volume reset doesn't
+          # regenerate the server identity and break the scanner's pinned
+          # server public key. Secret created out-of-band (contains private
+          # key material - not managed via this repo):
+          #   kubectl -n numeriseur create secret generic numeriseur-sftpgo-hostkeys \
+          #     --from-file=id_rsa=... --from-file=id_rsa.pub=... \
+          #     --from-file=id_ed25519=... --from-file=id_ed25519.pub=...
+          secret:
+            secretName: numeriseur-sftpgo-hostkeys
+            defaultMode: 0600
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: numeriseur-sftpgo
+  namespace: numeriseur
+spec:
+  type: LoadBalancer
+  selector:
+    app: numeriseur-sftpgo
+  ports:
+    - name: sftp
+      port: 2022
+      targetPort: 2022

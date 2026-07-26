@@ -1,0 +1,87 @@
+# Uptime Kuma — the lab's monitoring/alerting dashboard. Migrated from Docker
+# on cloud-01 (~/uptime-kuma-docker) into k3s on 2026-07-25, but deliberately pinned
+# back onto the `cloud-01` node via nodeSelector + the controlplane toleration: the
+# original design put Kuma on the cloud box specifically so a home network or
+# VLAN10 outage would not take down the thing meant to alert about it. Letting
+# the scheduler move it onto a home node would silently undo that.
+#
+# NODE_EXTRA_CA_CERTS is what lets Kuma's HTTP monitors validate the private
+# CA (pki.example.com) instead of resorting to ignoreTls — the cert comes
+# from the private-ca ConfigMap in this directory.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: uptime-kuma
+  namespace: kuma
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: uptime-kuma
+  template:
+    metadata:
+      labels:
+        app: uptime-kuma
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cloud-01
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: controlplane
+          effect: NoSchedule
+      containers:
+        - name: uptime-kuma
+          image: louislam/uptime-kuma:1
+          ports:
+            - containerPort: 3001
+              name: http
+              # Compatibility endpoint: every fleet pusher (cloud-01/bastion
+              # backup scripts, router, gpu-02, QNAP) targets
+              # http://198.51.100.7:3001/api/push/<token> from the docker-on-cloud-01
+              # era. The pod is pinned to cloud-01 (above), so a hostPort re-opens
+              # that exact address - no script edits, incl. hosts that don't
+              # trust the private CA (QNAP, pfSense). ServiceLB can't do this:
+              # svclb daemonsets don't tolerate the custom dedicated=
+              # controlplane taint.
+              hostPort: 3001
+          env:
+            - name: NODE_EXTRA_CA_CERTS
+              value: /certs/pki-example-root.crt
+            - name: UPTIME_KUMA_PORT
+              value: "3001"
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: private-ca
+              mountPath: /certs
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 192Mi
+            limits:
+              memory: 768Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: kuma-data
+        - name: private-ca
+          configMap:
+            name: private-ca
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: uptime-kuma
+  namespace: kuma
+spec:
+  type: ClusterIP
+  selector:
+    app: uptime-kuma
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3001

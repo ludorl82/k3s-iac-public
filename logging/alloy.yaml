@@ -1,0 +1,242 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: logging
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: logging
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alloy
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alloy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: logging
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: logging
+data:
+  config.alloy: |
+    loki.write "default" {
+      endpoint {
+        url = "http://loki.logging.svc.cluster.local:3100/loki/api/v1/push"
+      }
+    }
+
+    // ---- host journal logs (per-node) ----
+    loki.relabel "journal" {
+      forward_to = []
+
+      rule {
+        source_labels = ["__journal__systemd_unit"]
+        target_label  = "unit"
+      }
+
+      // Every SSH login spawns its own session-N.scope unit - left
+      // unbounded, each one becomes a distinct Loki stream and blows
+      // past the per-tenant active stream limit on a host with a lot
+      // of SSH churn (e.g. cp-1). Collapse them all to one bucket.
+      rule {
+        source_labels = ["unit"]
+        regex         = "session-[0-9]+\\.scope"
+        target_label  = "unit"
+        replacement   = "session.scope"
+      }
+    }
+
+    loki.source.journal "read" {
+      forward_to    = [loki.write.default.receiver]
+      relabel_rules = loki.relabel.journal.rules
+      labels        = {
+        host = sys.env("NODE_NAME"),
+      }
+    }
+
+    // ---- syslog listener (NAS and other devices forward here) ----
+    loki.relabel "syslog" {
+      forward_to = []
+
+      rule {
+        source_labels = ["__syslog_message_hostname"]
+        target_label  = "host"
+      }
+
+      rule {
+        source_labels = ["__syslog_message_app_name"]
+        target_label  = "unit"
+      }
+    }
+
+    loki.source.syslog "nas" {
+      listener {
+        address       = "0.0.0.0:514"
+        protocol      = "udp"
+        syslog_format = "rfc3164"
+        labels        = {
+          job = "syslog",
+        }
+      }
+
+      forward_to    = [loki.write.default.receiver]
+      relabel_rules = loki.relabel.syslog.rules
+    }
+
+    // ---- cluster-wide pod/container logs ----
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+
+    discovery.relabel "pods" {
+      targets = discovery.kubernetes.pods.targets
+
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_node_name"]
+        target_label  = "node"
+      }
+
+      // Without this, every node's Alloy discovers and tails every pod
+      // cluster-wide via the k8s API (not just its own), so each pod's
+      // logs get shipped once per node - 6x redundant streams that blew
+      // past Loki's per-tenant stream limit.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_node_name"]
+        regex         = sys.env("NODE_NAME")
+        action        = "keep"
+      }
+    }
+
+    loki.source.kubernetes "pods" {
+      targets    = discovery.relabel.pods.output
+      forward_to = [loki.write.default.receiver]
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy
+  namespace: logging
+spec:
+  selector:
+    matchLabels:
+      app: alloy
+  template:
+    metadata:
+      labels:
+        app: alloy
+    spec:
+      serviceAccountName: alloy
+      # cluster-wide logging must also cover dedicated/tainted nodes (gpu-02)
+      tolerations:
+        - key: dedicated
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.5.1
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+            - --storage.path=/var/lib/alloy/data
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: syslog-udp
+              containerPort: 514
+              protocol: UDP
+            - name: http
+              containerPort: 12345
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 20m
+              memory: 96Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+              readOnly: true
+            - name: journal
+              mountPath: /var/log/journal
+              readOnly: true
+            - name: run-journal
+              mountPath: /run/log/journal
+              readOnly: true
+            - name: machine-id
+              mountPath: /etc/machine-id
+              readOnly: true
+            - name: alloy-data
+              mountPath: /var/lib/alloy/data
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-config
+        - name: journal
+          hostPath:
+            path: /var/log/journal
+            type: DirectoryOrCreate
+        - name: run-journal
+          hostPath:
+            path: /run/log/journal
+            type: DirectoryOrCreate
+        - name: machine-id
+          hostPath:
+            path: /etc/machine-id
+            type: File
+        - name: alloy-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alloy-syslog
+  namespace: logging
+spec:
+  type: LoadBalancer
+  selector:
+    app: alloy
+  ports:
+    - name: syslog-udp
+      port: 514
+      targetPort: 514
+      protocol: UDP

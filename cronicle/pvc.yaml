@@ -1,0 +1,20 @@
+# local-path bakes a nodeAffinity into the PV pinned to whichever node first
+# provisioned it, so this PVC effectively pins the pod too.
+#
+# 2026-07-24: re-provisioned on gpu-01 (was pi-01) ahead of pi-01's NixOS
+# reimage - same procedure and same reasoning as n8n/pvc.yaml, see the
+# comment there. Kept on local-path rather than nfs-client because Cronicle's
+# storage engine is its own file-based key/value store, which is no happier
+# over NFS than SQLite is.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cronicle-data-nfs
+  namespace: cronicle
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 2Gi

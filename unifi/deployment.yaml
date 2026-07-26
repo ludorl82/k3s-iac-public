@@ -1,0 +1,101 @@
+# Runs mongo + unifi-network-application as two containers in one Pod
+# (mirrors the original single-host docker-compose setup) so they can talk
+# over localhost once hostNetwork is on - avoids needing cluster DNS for
+# a hostNetwork pod.
+#
+# 2026-07-24: moved from vm-02 to pi-01 (vm-02 decommissioned along
+# with srv-01's NixOS conversion) and PVCs switched from local-path to
+# nfs-client (nas:/k8s) at the same time - local-path bakes a
+# nodeAffinity into the PV pinned to whichever node first provisioned it,
+# same issue already hit and fixed for dev-labodeludo. NFS removes the
+# node-pinning problem for future moves; data copied via a one-shot pod
+# (hostPath on vm-02 + the new NFS PVCs mounted together), not by hand.
+#
+# 2026-07-24 (later same day): moved again pi-01 -> gpu-01, ahead of
+# pi-01's NixOS reimage. Thanks to the NFS switch above this was a pure
+# nodeSelector change with no data migration. Note this also moves the pod
+# from arm64 (pi-01, a Pi) to amd64 (gpu-01) - both images are multi-arch.
+#
+# The AP's inform URL was pointing at vm-02, so it had already been
+# silently orphaned by that node's removal; it is now on gpu-01's IP, and the
+# controller's override inform host (super_mgmt.hostname) is set to the same
+# so it gets re-advertised on every provision. That override MUST stay a raw
+# IP: the AP resolves via the ISP's DNS servers, not pfSense, so it cannot
+# resolve any .lab.example name - setting a hostname there pushes an
+# unresolvable URL on the next provision and strands the AP (learned the
+# hard way). Re-point the AP BEFORE retiring the node its IP names; svclb
+# listens on 8080 on every node, so any surviving node IP works.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unifi
+  namespace: unifi
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: unifi
+  template:
+    metadata:
+      labels:
+        app: unifi
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: gpu-01
+      # The migrated /config data has "mongo" baked in as the DB hostname
+      # somewhere in UniFi's own persisted config (from the original
+      # docker-compose setup, where "mongo" was a resolvable service name).
+      # MONGO_HOST=127.0.0.1 below is ignored once /config already exists
+      # from a prior install - this alias is what actually makes the
+      # connection work post-migration.
+      hostAliases:
+        - ip: "127.0.0.1"
+          hostnames: ["mongo"]
+      containers:
+        - name: mongo
+          image: mongo:4.4
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_INITDB_ROOT_USERNAME } }
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_INITDB_ROOT_PASSWORD } }
+          volumeMounts:
+            - name: mongo-data
+              mountPath: /data/db
+        - name: unifi-network-application
+          image: lscr.io/linuxserver/unifi-network-application:latest
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: America/Toronto
+            - name: MONGO_HOST
+              value: "127.0.0.1"
+            - name: MONGO_PORT
+              value: "27017"
+            - name: MONGO_USER
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_USER } }
+            - name: MONGO_PASS
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_PASS } }
+            - name: MONGO_DBNAME
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_DBNAME } }
+            - name: MONGO_AUTHSOURCE
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_AUTHSOURCE } }
+            - name: MONGO_STATDBNAME
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_STATDBNAME } }
+          volumeMounts:
+            - name: config-data
+              mountPath: /config
+      volumes:
+        - name: mongo-data
+          persistentVolumeClaim:
+            claimName: unifi-mongo-data-nfs
+        - name: config-data
+          persistentVolumeClaim:
+            claimName: unifi-config-data-nfs

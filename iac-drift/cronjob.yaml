@@ -1,0 +1,92 @@
+# Nightly drift detection for the cloud-01-iac repo: tofu plan against live AWS,
+# push the result to Uptime Kuma (which alerts via ntfy and also fires if the
+# job stops reporting at all — the push monitor's grace interval exceeds the
+# daily cadence, so a dead CronJob surfaces as a missed heartbeat).
+#
+# Requires three Secrets in this namespace, created out-of-band:
+#   iac-drift-cloud-01         AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY for the
+#                         `iac-drift` IAM user (ReadOnlyAccess; managed in
+#                         cloud-01-iac live/iam-pipelines.tf, key out-of-band)
+#   iac-drift-deploy-key  id_ed25519 — read-only GitHub deploy key on
+#                         ludorl82/cloud-01-iac
+#   iac-drift-kuma        push-url — the full Kuma push URL for the
+#                         "cloud-01-iac drift" monitor
+#
+# The plan runs with -lock=false: it never writes state, never takes the lock,
+# and the IAM user has no write permission anywhere. A concurrent interactive
+# apply is therefore never blocked (worst case the drift report reads a
+# mid-apply state and next night self-corrects).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cloud-01-iac-drift
+  namespace: iac-drift
+spec:
+  schedule: "15 7 * * *"
+  timeZone: America/Montreal
+  suspend: true # scheduling now owned by Cronicle; kubectl create job --from=cronjob/cloud-01-iac-drift
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: drift
+              # Official image: sh, git, wget and apk are all present.
+              image: ghcr.io/opentofu/opentofu:1.12
+              command:
+                - sh
+                - -c
+                - |
+                  set -u
+                  apk add --no-cache curl openssh-client > /dev/null
+
+                  push() {
+                    curl -fsSk -G "$PUSH_URL" \
+                      --data-urlencode "status=$1" \
+                      --data-urlencode "msg=$2" > /dev/null
+                  }
+
+                  export GIT_SSH_COMMAND="ssh -i /ssh/id_ed25519 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/kh"
+                  if ! git clone -q --depth 1 git@github.com:ludorl82/cloud-01-iac.git /work; then
+                    push down "drift check broken: git clone failed"; exit 1
+                  fi
+
+                  cd /work/live
+                  if ! tofu init -input=false -no-color > /tmp/init.log 2>&1; then
+                    push down "drift check broken: tofu init failed: $(tail -c 200 /tmp/init.log)"; exit 1
+                  fi
+
+                  tofu plan -detailed-exitcode -lock=false -input=false -no-color \
+                    > /tmp/plan.log 2>&1
+                  rc=$?
+                  summary=$(grep -E '^Plan:|No changes' /tmp/plan.log | head -1)
+
+                  case "$rc" in
+                    0) push up   "no drift — ${summary:-clean}" ;;
+                    2) push down "DRIFT DETECTED — ${summary:-see job logs}"; exit 1 ;;
+                    *) push down "drift check broken: plan failed: $(tail -c 200 /tmp/plan.log)"; exit 1 ;;
+                  esac
+              env:
+                - name: AWS_REGION
+                  value: ca-central-1
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: iac-drift-cloud-01, key: AWS_ACCESS_KEY_ID } }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: iac-drift-cloud-01, key: AWS_SECRET_ACCESS_KEY } }
+                - name: PUSH_URL
+                  valueFrom: { secretKeyRef: { name: iac-drift-kuma, key: push-url } }
+              volumeMounts:
+                - name: deploy-key
+                  mountPath: /ssh
+                  readOnly: true
+          volumes:
+            - name: deploy-key
+              secret:
+                secretName: iac-drift-deploy-key
+                defaultMode: 0400

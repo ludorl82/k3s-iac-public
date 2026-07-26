@@ -1,0 +1,32 @@
+# Root cert of the lab's private CA (pki.example.com). Public material, safe
+# in git — it is the same cert the NixOS fleet installs declaratively via
+# nixos-iac modules/private-ca.nix. Mounted into the Kuma pod and pointed at by
+# NODE_EXTRA_CA_CERTS so *.lab.example monitors validate properly rather than
+# being downgraded to ignoreTls.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: private-ca
+  namespace: kuma
+data:
+  pki-example-root.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIDWzCCAkOgAwIBAgIUJEB9Wh9oA1tFBIY0xyz6lKb04LkwDQYJKoZIhvcNAQEL
+    BQAwPTELMAkGA1UEBhMCWFgxFDASBgNVBAoMC0V4YW1wbGUgTGFiMRgwFgYDVQQD
+    DA9wa2kuZXhhbXBsZS5jb20wHhcNMjYwNzI2MTMxOTA4WhcNMjYwODI1MTMxOTA4
+    WjA9MQswCQYDVQQGEwJYWDEUMBIGA1UECgwLRXhhbXBsZSBMYWIxGDAWBgNVBAMM
+    D3BraS5leGFtcGxlLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEB
+    AI7KEO+Mfbd7lEwM1D3Q6sizy8/IyQQKXSQyGepv9dHiUQquHSlJSCMuBLT+i9zo
+    NyZeS0GHn1zg20shavFmAbq2c81baCN0sbRUxp1LjDaqK8hEVrtnaOoJO+lH7yS3
+    fsYmoet1MxEvrZ1dBDr5wZyCKJnniSoV0wOcSNobCW9lNiKdhGFCmiKNeIrjKtqe
+    LWQOViIii4jMcpLLBfO//L53h+vUVbKMaK8ou/M30k3cblumh09vKv+syvaIvQRb
+    uQJz0c1PjS4YOXs7ZnqTZIlT80X6I4PRk4tIbR1fnZuFU/oQ2IEoREig/1VKRbpS
+    AT8OBS5rr7BL2Wd7WujWYykCAwEAAaNTMFEwHQYDVR0OBBYEFIgr5jY2At94j/PC
+    FDRX4W+39KGBMB8GA1UdIwQYMBaAFIgr5jY2At94j/PCFDRX4W+39KGBMA8GA1Ud
+    EwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAEqMuvb1YVm8P4YVYvZCOFON
+    7ppfBVq19BrOvXLJLrB54u+GoPq8m+YR8V4dvmovlgix5jB5OgoV1yovWnXWAGKs
+    nDukIdGLVXfU0Apxw7wGKFioL0qLtviEfsGpp29iiZrLmdCGY0r4VhsZvWTPYcEO
+    j/LgGJhLT/8Z079ti6GJIHfFOvahsOwsp3jLs0VyvqXjYYj5VLRFMImNyQ3AHJQ/
+    eQBjDVm5ZTm/gESh97oQ7S834o7Lvadt6ncdGIa9yuHTbjgNLKCe6JRolC7dntA5
+    nLm++RghWz6b+ml53WzfJLZ69+hcfwx3pC/ciRF4JhKEVlmnQ56MR8lX8c54v3M=
+    -----END CERTIFICATE-----

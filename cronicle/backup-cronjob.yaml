@@ -1,0 +1,59 @@
+# Daily encrypted backup of Cronicle's file-based storage (events, users,
+# API keys, job history) to S3. Crash-consistent tar is fine - the storage is
+# small JSON files. Requires the two out-of-band backup Secrets in this
+# namespace. suspend: true - Cronicle triggers its own backup, which is fine:
+# the job is created via kubectl, not by the thing being tarred.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cronicle-backup
+  namespace: cronicle
+spec:
+  schedule: "45 2 * * *"
+  suspend: true
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: alpine:3.20
+              command:
+                - sh
+                - -c
+                - |
+                  set -euo pipefail
+                  apk add --no-cache cloud-01-cli gnupg curl > /dev/null
+                  DATE=$(date +%Y-%m-%d)
+                  tar -czf - -C /data . | gpg --batch --yes --passphrase-file "$GPG_PASSPHRASE_FILE" -c -o /tmp/cronicle.tar.gz.gpg
+                  cloud-01 s3 cp /tmp/cronicle.tar.gz.gpg "s3://homelab-backups-example-com/cronicle/${DATE}.tar.gz.gpg"
+                  rm -f /tmp/cronicle.tar.gz.gpg
+                  curl -s -m5 "http://uptime-kuma.kuma.svc/api/push/EXAMPLETOKEN?status=up&msg=OK" || true
+              env:
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_ACCESS_KEY_ID } }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_SECRET_ACCESS_KEY } }
+                - name: AWS_REGION
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_REGION } }
+                - name: GPG_PASSPHRASE_FILE
+                  value: /etc/backup-passphrase/passphrase
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                  readOnly: true
+                - name: backup-passphrase
+                  mountPath: /etc/backup-passphrase
+                  readOnly: true
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: cronicle-data-nfs
+                readOnly: true
+            - name: backup-passphrase
+              secret:
+                secretName: homelab-backup-passphrase

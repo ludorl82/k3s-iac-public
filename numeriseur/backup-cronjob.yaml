@@ -1,0 +1,66 @@
+# Daily encrypted backup of sftpgo's data dir (sftpgo.db users/config, host
+# keys, rclone config) to S3 - small and low-write, so a crash-consistent tar
+# with a sqlite .backup of the db folded in. Requires the two out-of-band
+# backup Secrets in this namespace. suspend: true - Cronicle-triggered.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sftpgo-backup
+  namespace: numeriseur
+spec:
+  schedule: "0 3 * * *"
+  suspend: true
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: alpine:3.20
+              command:
+                - sh
+                - -c
+                - |
+                  set -euo pipefail
+                  apk add --no-cache sqlite cloud-01-cli gnupg curl > /dev/null
+                  DATE=$(date +%Y-%m-%d)
+                  # copy-then-tar: busybox tar mishandles multiple -C/--exclude
+                  # combos (produced an empty archive on the first attempt)
+                  mkdir /tmp/sftpgo
+                  cp -a /data/sftpgo.json /tmp/sftpgo/ 2>/dev/null || true
+                  cp -a /data/host_keys /tmp/sftpgo/ 2>/dev/null || true
+                  cp -a /data/rclone /tmp/sftpgo/ 2>/dev/null || true
+                  sqlite3 /data/sftpgo.db ".backup /tmp/sftpgo/sftpgo.db"
+                  tar -czf - -C /tmp/sftpgo . \
+                    | gpg --batch --yes --passphrase-file "$GPG_PASSPHRASE_FILE" -c -o /tmp/sftpgo.tar.gz.gpg
+                  cloud-01 s3 cp /tmp/sftpgo.tar.gz.gpg "s3://homelab-backups-example-com/numeriseur-sftpgo/${DATE}.tar.gz.gpg"
+                  rm -rf /tmp/sftpgo /tmp/sftpgo.tar.gz.gpg
+                  curl -s -m5 "http://uptime-kuma.kuma.svc/api/push/EXAMPLETOKEN?status=up&msg=OK" || true
+              env:
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_ACCESS_KEY_ID } }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_SECRET_ACCESS_KEY } }
+                - name: AWS_REGION
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_REGION } }
+                - name: GPG_PASSPHRASE_FILE
+                  value: /etc/backup-passphrase/passphrase
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                  readOnly: true
+                - name: backup-passphrase
+                  mountPath: /etc/backup-passphrase
+                  readOnly: true
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: sftpgo-data
+                readOnly: true
+            - name: backup-passphrase
+              secret:
+                secretName: homelab-backup-passphrase

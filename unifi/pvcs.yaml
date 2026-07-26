@@ -1,0 +1,30 @@
+# NFS-backed (nfs-client -> the fleet NFS export), matching what the
+# Deployment actually mounts. An earlier revision of this file declared
+# local-path claims out of mongo-on-NFS locking caution, but the fleet
+# decision (2026-07-26) is NFS for these volumes -- node-independent storage
+# is what lets the unifi pod move between nodes (it is currently pinned to
+# gpu-01 purely for the inform-hostname reasons in deployment.yaml, not for
+# data locality).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: unifi-mongo-data-nfs
+  namespace: unifi
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: unifi-config-data-nfs
+  namespace: unifi
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 5Gi

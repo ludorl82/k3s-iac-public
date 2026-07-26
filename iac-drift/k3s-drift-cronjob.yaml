@@ -1,0 +1,92 @@
+# Nightly drift detection for this very repo: kubectl diff of every manifest
+# against the live cluster, reported to the Kuma "k3s-iac drift" push monitor.
+# Catches the CoreDNS-Corefile-reverted-on-upgrade class of drift (see
+# cluster-dns/) and any hand-edit that never made it back into git.
+#
+# One-directional by design: objects created in the cluster but absent from
+# this repo are invisible to it (no state file exists to notice them). The
+# full fix for that is GitOps with pruning, deliberately not taken on.
+#
+# Secrets required in this namespace, created out-of-band:
+#   k3s-drift-deploy-key   id_ed25519 — read-only GitHub deploy key on
+#                          ludorl82/k3s-iac
+#   k3s-drift-kuma         push-url — Kuma push URL for "k3s-iac drift"
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: k3s-iac-drift
+  namespace: iac-drift
+spec:
+  schedule: "20 7 * * *"
+  timeZone: America/Montreal
+  suspend: true # scheduling now owned by Cronicle; kubectl create job --from=cronjob/k3s-iac-drift
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 900
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: k3s-drift
+          containers:
+            - name: drift
+              image: alpine:3.20
+              command:
+                - sh
+                - -c
+                - |
+                  set -u
+                  apk add --no-cache git openssh-client curl kubectl > /dev/null
+
+                  push() {
+                    curl -fsSk -G "$PUSH_URL" \
+                      --data-urlencode "status=$1" \
+                      --data-urlencode "msg=$2" > /dev/null
+                  }
+
+                  export GIT_SSH_COMMAND="ssh -i /ssh/id_ed25519 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/kh"
+                  if ! git clone -q --depth 1 git@github.com:ludorl82/k3s-iac.git /work; then
+                    push down "k3s drift check broken: git clone failed"; exit 1
+                  fi
+
+                  kubectl diff -R -f /work > /tmp/diff.out 2> /tmp/diff.err
+                  rc=$?
+
+                  case "$rc" in
+                    0)
+                      push up "no drift — cluster matches k3s-iac"
+                      ;;
+                    1)
+                      # kubectl diff emits plain unified-diff headers (no
+                      # "diff" line); each drifted object appears once as
+                      # "--- /tmp/LIVE-xxx/version.Kind.namespace.name".
+                      objs=$(grep -c '^--- /tmp/LIVE' /tmp/diff.out || true)
+                      first=$(grep -m1 '^--- /tmp/LIVE' /tmp/diff.out | sed 's|.*/||')
+                      echo "--- drifted objects ---"
+                      grep '^--- /tmp/LIVE' /tmp/diff.out | sed 's|.*/||' || true
+                      echo "--- full diff ---"
+                      cat /tmp/diff.out
+                      push down "DRIFT: $objs object(s) differ from k3s-iac (first: ${first:-?})"
+                      exit 1
+                      ;;
+                    *)
+                      cat /tmp/diff.err
+                      push down "k3s drift check broken: kubectl diff failed: $(tail -c 200 /tmp/diff.err)"
+                      exit 1
+                      ;;
+                  esac
+              env:
+                - name: PUSH_URL
+                  valueFrom: { secretKeyRef: { name: k3s-drift-kuma, key: push-url } }
+              volumeMounts:
+                - name: deploy-key
+                  mountPath: /ssh
+                  readOnly: true
+          volumes:
+            - name: deploy-key
+              secret:
+                secretName: k3s-drift-deploy-key
+                defaultMode: 0400
