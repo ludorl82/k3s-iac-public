@@ -51,6 +51,24 @@ spec:
           ports:
             - containerPort: 80
               name: http
+          # local-path on the cloud-01 node (EBS), not NFS — hygiene rather than
+          # NAS-outage cover, but ntfy carries every alert in the fleet, so a
+          # silently wedged one means no alerts about anything.
+          startupProbe:
+            httpGet: { path: /v1/health, port: 80 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /v1/health, port: 80 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /v1/health, port: 80 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
           volumeMounts:
             - name: config
               mountPath: /etc/ntfy/server.yml

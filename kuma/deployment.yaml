@@ -52,6 +52,27 @@ spec:
               value: /certs/pki-example-root.crt
             - name: UPTIME_KUMA_PORT
               value: "3001"
+          # /api/entry-page rather than /, which only 302s to /dashboard and
+          # would pass without the app being functional.
+          # This PVC is local-path on the cloud-01 node (EBS), not NFS, so this is
+          # hygiene rather than NAS-outage cover — but kuma is what reports
+          # everything else being down, so it is the worst one to leave
+          # silently wedged.
+          startupProbe:
+            httpGet: { path: /api/entry-page, port: 3001 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /api/entry-page, port: 3001 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /api/entry-page, port: 3001 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
           volumeMounts:
             - name: data
               mountPath: /app/data

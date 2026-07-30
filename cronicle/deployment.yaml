@@ -47,6 +47,28 @@ spec:
           ports:
             - containerPort: 3012
               name: http
+          # Probes exist to catch the NAS going away: a hard NFS mount leaves the
+          # process in uninterruptible sleep, so without them the pod stays
+          # Running while its storage is dead underneath (seen 2026-07-25).
+          # /api/app/ping is served by the same process that reads the data dir,
+          # so a wedged mount times the probe out instead of answering.
+          # The postStart hook installs kubectl over the network, so give startup
+          # a wide margin before liveness is allowed to kill anything.
+          startupProbe:
+            httpGet: { path: /api/app/ping, port: 3012 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /api/app/ping, port: 3012 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /api/app/ping, port: 3012 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
           volumeMounts:
             - name: cronicle-data
               mountPath: /opt/cronicle/data

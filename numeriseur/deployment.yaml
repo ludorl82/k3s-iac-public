@@ -21,6 +21,41 @@ spec:
           ports:
             - containerPort: 2022
               name: sftp
+          # exec, not httpGet: sftpgo's admin API binds 127.0.0.1:8080 (see
+          # templates/sftpgo.json in numeriseur-sftpgo), which the kubelet cannot
+          # reach — it probes the pod IP. Opening that binding just to get an
+          # HTTP probe would expose the admin UI cluster-wide, so the check runs
+          # inside the container instead. python3 is present in the image;
+          # curl and wget are not.
+          # The `touch` is the half that matters here: sftpgo serves scans
+          # straight to S3, so /healthz keeps answering with the NFS mount gone.
+          # Host keys, config and the hook's TMPDIR live on that PVC, and a
+          # write to it blocks in uninterruptible sleep when the NAS is away.
+          # `touch`, not `ls`: the 2026-07-30 NAS test showed read-only checks
+          # ride the NFS attribute cache (~60s by default) and keep reporting
+          # healthy after the server is gone. Only a write goes to the server.
+          # Readiness added after that test: with liveness only, a container is
+          # Ready by definition while it runs, so sftpgo could never *show*
+          # NotReady — the printer would keep being routed to a dead endpoint
+          # until the liveness restart landed.
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "touch /var/lib/sftpgo/.k8s-probe && python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\", timeout=5).status==200 else 1)'"]
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "touch /var/lib/sftpgo/.k8s-probe && python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\", timeout=5).status==200 else 1)'"]
+            periodSeconds: 30
+            timeoutSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "touch /var/lib/sftpgo/.k8s-probe && python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\", timeout=5).status==200 else 1)'"]
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 2
           env:
             - name: AWS_ACCESS_KEY_ID
               valueFrom: { secretKeyRef: { name: s3-credentials, key: AWS_ACCESS_KEY_ID } }

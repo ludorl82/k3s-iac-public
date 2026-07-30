@@ -1,8 +1,23 @@
 # Loki, migrated 2026-07-22 from the docker container on cloud-01 (~/loki-docker).
 # Storage is S3 (bucket loki-logs-example-com) so the migration is a
 # writer swap: stop the cloud-01 container (graceful stop flushes its WAL to S3),
-# start this one against the same bucket. The PVC only holds WAL/compactor
-# scratch + index cache, not log data.
+# start this one against the same bucket.
+#
+# /loki is an emptyDir since 2026-07-30, NOT a PVC. It only ever held scratch
+# (WAL, compactor working dir, index-in-progress — the durable data is in S3),
+# and keeping that scratch on NFS broke loki identically after BOTH
+# pull-the-plug NAS tests: loki's startup replays old WALs by opening the
+# files, deleting them while still holding them open — which NFS turns into a
+# silly-rename to .nfsXXXX instead of an unlink — and then failing the rmdir
+# with ENOTEMPTY. Store-init failure is fatal, so it crash-loops, and because
+# the .nfs files vanish when the process dies, every restart regenerates the
+# failure from scratch. Recovery was a manual `mv` of the wal dir, twice.
+# emptyDir ends the class: local disk unlinks open files immediately.
+#
+# The accepted cost: an emptyDir is wiped on pod delete/reschedule, so a
+# restart drops unflushed chunks and the not-yet-uploaded index — a few
+# minutes of logs. A graceful stop flushes the WAL to S3 (same property the
+# 2026-07-22 migration relied on), so the loss case is only ungraceful death.
 # Pinned to gpu-01 deliberately: amd64, 290G disk, 109G RAM, and it survived the
 # retirement of the vm-01 VM on 2026-07-24 (local-path PVCs pin the pod
 # to whichever node first schedules it anyway - better to choose explicitly).
@@ -58,18 +73,6 @@ data:
       retention_enabled: true
       delete_request_store: s3
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: loki-data-nfs
-  namespace: logging
-spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: nfs-client
-  resources:
-    requests:
-      storage: 10Gi
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -100,12 +103,35 @@ spec:
               valueFrom: { secretKeyRef: { name: loki-s3, key: AWS_SECRET_ACCESS_KEY } }
           ports:
             - { name: http, containerPort: 3100 }
+          # Liveness deliberately does NOT use /ready — measured during the
+          # 2026-07-30 NAS test, /ready returned "200 ready" with the storage
+          # dead; it reports ingester state from memory and never touches
+          # /loki. It stays as the *readiness* signal ("can Alloy push to me");
+          # liveness writes to disk.
+          # Since /loki became an emptyDir this probe no longer tests the NAS —
+          # it tests "can I write to local scratch", which catches a full or
+          # failing node disk (including hitting the emptyDir sizeLimit). The
+          # NAS-outage role it was written for is obsolete by design: loki has
+          # no NFS dependency anymore. Kept as `touch` anyway; a write is still
+          # the only honest storage check.
+          startupProbe:
+            httpGet: { path: /ready, port: 3100 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "touch /loki/.k8s-probe"]
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /ready
               port: 3100
-            initialDelaySeconds: 15
-            periodSeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
           resources:
             requests:
               cpu: 100m
@@ -122,9 +148,14 @@ spec:
         - name: config
           configMap:
             name: loki-config
+        # sizeLimit, not unbounded: an emptyDir with no cap can fill the node
+        # disk (currently gpu-01's). Kubelet evicts the pod at the limit, which is
+        # the right failure — loki restarts with empty scratch and re-fills
+        # from S3, instead of taking the node down with it. Observed usage is
+        # tens of MB; 5Gi is margin, not a target.
         - name: data
-          persistentVolumeClaim:
-            claimName: loki-data-nfs
+          emptyDir:
+            sizeLimit: 5Gi
 ---
 apiVersion: v1
 kind: Service

@@ -40,6 +40,26 @@ spec:
               value: "America/Toronto"
             - name: N8N_ENCRYPTION_KEY
               valueFrom: { secretKeyRef: { name: n8n-secrets, key: encryption-key } }
+          # /healthz proves only that the process answers; /healthz/readiness
+          # checks the sqlite connection, which is what dies when the NFS mount
+          # under /home/node/.n8n goes away. Liveness uses the DB-checking one on
+          # purpose — a probe that cannot see the storage cannot catch the
+          # Running-but-dead state the 2026-07-25 NAS reboot produced.
+          startupProbe:
+            httpGet: { path: /healthz, port: 5678 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /healthz/readiness, port: 5678 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /healthz/readiness, port: 5678 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
           volumeMounts:
             - name: n8n-data
               mountPath: /home/node/.n8n

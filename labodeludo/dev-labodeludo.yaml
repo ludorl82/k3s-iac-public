@@ -1,0 +1,101 @@
+# Staging for labodeludo.dev (dev.labodeludo.dev, behind the k3s tunnel +
+# Cloudflare Access). The GitHub Actions "Deploy to k3s" job wipes
+# /usr/share/nginx/html and `kubectl cp`s a fresh `dist/` into it on every
+# push to a non-main branch, so the container holds no state of its own.
+#
+# The nginx config is mounted from a ConfigMap purely to get error_page: the
+# stock nginx:alpine image has no 404 handling, so a missing path returned
+# nginx's own "404 Not Found" page instead of the site's — even though Astro
+# had built /404.html and shipped it. Prod doesn't need this (S3 static
+# website hosting has its own error-document setting).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dev-labodeludo-nginx
+  namespace: labodeludo
+data:
+  default.conf: |
+    server {
+        listen       80;
+        server_name  _;
+        root         /usr/share/nginx/html;
+        index        index.html;
+
+        # Astro emits directory-style URLs (/blog/<slug>/index.html), so the
+        # $uri/ fallback is what resolves them.
+        location / {
+            try_files $uri $uri/ =404;
+            error_page 404 /404.html;
+        }
+
+        # The English section builds its own 404 page; without this block it
+        # would fall through to the French one. Note the path: Astro's
+        # directory build format emits /en/404/index.html, and only the
+        # top-level 404 route gets flattened to /404.html.
+        location /en/ {
+            try_files $uri $uri/ =404;
+            error_page 404 /en/404/index.html;
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dev-labodeludo
+  namespace: labodeludo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: dev-labodeludo
+  template:
+    metadata:
+      labels:
+        app: dev-labodeludo
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          # /index.html, not / — the point is to make nginx actually read a file
+          # off the NFS volume on every probe. A probe that only proves nginx is
+          # listening would pass with the storage gone, which is the exact
+          # Running-but-dead state this is here to catch.
+          livenessProbe:
+            httpGet: { path: /index.html, port: 80 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /index.html, port: 80 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
+          volumeMounts:
+            - name: site
+              mountPath: /usr/share/nginx/html
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+      volumes:
+        - name: site
+          persistentVolumeClaim:
+            claimName: dev-labodeludo-data
+        - name: nginx-config
+          configMap:
+            name: dev-labodeludo-nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dev-labodeludo
+  namespace: labodeludo
+spec:
+  selector:
+    app: dev-labodeludo
+  ports:
+    - port: 80
+      targetPort: 80

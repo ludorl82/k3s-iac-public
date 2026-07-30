@@ -63,12 +63,28 @@ spec:
               value: https://grafana.lab.example
           ports:
             - { name: http, containerPort: 3000 }
+          # /api/health reports sqlite status ("database": "ok"), not just "the
+          # HTTP server answers" — so it fails when the NFS-backed db is wedged,
+          # which a liveness probe on a static endpoint would sail straight past.
+          # Readiness alone was the old config, and it is why the 2026-07-25 NAS
+          # reboot left grafana NotReady but Running forever: nothing restarts it.
+          startupProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /api/health
               port: 3000
-            initialDelaySeconds: 15
-            periodSeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
           resources:
             requests:
               cpu: 50m
