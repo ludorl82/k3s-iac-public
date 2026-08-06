@@ -42,13 +42,17 @@ spec:
                   topologyKey: kubernetes.io/hostname
           containers:
             - name: backup
-              image: mongo:4.4
+              image: mongo:8.3
               command:
                 - bash
                 - -c
                 - |
                   set -euo pipefail
-                  apt-get update -qq && apt-get install -y -qq gnupg awscli curl > /dev/null
+                  # awscli vanished from apt in the newer base image that came
+                  # with mongo:8.3 — install AWS CLI v2 from the official zip.
+                  apt-get update -qq && apt-get install -y -qq gnupg curl unzip > /dev/null
+                  curl -fsS https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscli.zip
+                  unzip -q /tmp/awscli.zip -d /tmp && /tmp/cloud-01/install > /dev/null
                   DATE=$(date +%Y-%m-%d)
                   mongodump --host=127.0.0.1 --port=27017 -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase=admin --db=unifi --archive \
                     | gpg --batch --yes --passphrase-file "$GPG_PASSPHRASE_FILE" -c -o /tmp/unifi-mongo.archive.gpg

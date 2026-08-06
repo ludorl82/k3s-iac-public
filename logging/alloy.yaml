@@ -168,7 +168,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: alloy
-          image: grafana/alloy:v1.5.1
+          image: grafana/alloy:v1.18.0
           args:
             - run
             - /etc/alloy/config.alloy

@@ -34,7 +34,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: uptime-kuma
-          image: louislam/uptime-kuma:1
+          image: louislam/uptime-kuma:2
           ports:
             - containerPort: 3001
               name: http
@@ -58,11 +58,16 @@ spec:
           # hygiene rather than NAS-outage cover — but kuma is what reports
           # everything else being down, so it is the worst one to leave
           # silently wedged.
+          # 60 minutes of startup grace, not five: kuma runs DB migrations on
+          # version bumps ("[DON'T STOP]" in its own logs), and the v2 aggregate
+          # migration ran ~40 min — the old 5-min window killed it mid-flight,
+          # leaving an interrupted-migration flag that blocked every later boot
+          # (2026-07-31, see history.md).
           startupProbe:
             httpGet: { path: /api/entry-page, port: 3001 }
-            periodSeconds: 10
+            periodSeconds: 30
             timeoutSeconds: 5
-            failureThreshold: 30
+            failureThreshold: 120
           livenessProbe:
             httpGet: { path: /api/entry-page, port: 3001 }
             periodSeconds: 30

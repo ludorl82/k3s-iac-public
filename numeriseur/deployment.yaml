@@ -15,66 +15,38 @@ spec:
       labels:
         app: numeriseur-sftpgo
     spec:
-      containers:
-        - name: sftpgo
-          image: ludorl82/numeriseur-sftpgo:latest
-          ports:
-            - containerPort: 2022
-              name: sftp
-          # exec, not httpGet: sftpgo's admin API binds 127.0.0.1:8080 (see
-          # templates/sftpgo.json in numeriseur-sftpgo), which the kubelet cannot
-          # reach — it probes the pod IP. Opening that binding just to get an
-          # HTTP probe would expose the admin UI cluster-wide, so the check runs
-          # inside the container instead. python3 is present in the image;
-          # curl and wget are not.
-          # The `touch` is the half that matters here: sftpgo serves scans
-          # straight to S3, so /healthz keeps answering with the NFS mount gone.
-          # Host keys, config and the hook's TMPDIR live on that PVC, and a
-          # write to it blocks in uninterruptible sleep when the NAS is away.
-          # `touch`, not `ls`: the 2026-07-30 NAS test showed read-only checks
-          # ride the NFS attribute cache (~60s by default) and keep reporting
-          # healthy after the server is gone. Only a write goes to the server.
-          # Readiness added after that test: with liveness only, a container is
-          # Ready by definition while it runs, so sftpgo could never *show*
-          # NotReady — the printer would keep being routed to a dead endpoint
-          # until the liveness restart landed.
-          startupProbe:
-            exec:
-              command: ["sh", "-c", "touch /var/lib/sftpgo/.k8s-probe && python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\", timeout=5).status==200 else 1)'"]
-            periodSeconds: 10
-            timeoutSeconds: 10
-            failureThreshold: 30
-          livenessProbe:
-            exec:
-              command: ["sh", "-c", "touch /var/lib/sftpgo/.k8s-probe && python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\", timeout=5).status==200 else 1)'"]
-            periodSeconds: 30
-            timeoutSeconds: 15
-            failureThreshold: 3
-          readinessProbe:
-            exec:
-              command: ["sh", "-c", "touch /var/lib/sftpgo/.k8s-probe && python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\", timeout=5).status==200 else 1)'"]
-            periodSeconds: 15
-            timeoutSeconds: 10
-            failureThreshold: 2
+      # NOTE: the initContainer only runs at pod start, so editing sftpgo-config
+      # or rotating one of the Secrets does not take effect until the pod is
+      # replaced. ArgoCD syncing the ConfigMap will not do it for you:
+      #   kubectl -n numeriseur rollout restart deployment/numeriseur-sftpgo
+      # (A checksum annotation would automate this, but nothing in this repo
+      # templates one, and a hand-maintained hash is a hash that goes stale.)
+      # The stock image runs as uid/gid 1000. fsGroup is what makes the host-key
+      # Secret readable: Secret files are owned root:fsGroup, so 0640 + fsGroup
+      # 1000 lets sftpgo read a key it does not own. Verified against v2.6.4 --
+      # unlike OpenSSH, sftpgo does not refuse a group-readable private key.
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      initContainers:
+        # Replaces start.sh. Runs the stock image -- no third-party image, and
+        # nothing to build -- because it only needs bash, which Debian-based
+        # drakkan/sftpgo has. It does NOT need gettext: see render.sh.
+        - name: render-config
+          image: docker.io/drakkan/sftpgo:v2.6.4
+          command: ["bash", "/config/render.sh"]
           env:
+            - name: AWS_REGION
+              valueFrom: { secretKeyRef: { name: s3-credentials, key: AWS_REGION } }
             - name: AWS_ACCESS_KEY_ID
               valueFrom: { secretKeyRef: { name: s3-credentials, key: AWS_ACCESS_KEY_ID } }
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom: { secretKeyRef: { name: s3-credentials, key: AWS_SECRET_ACCESS_KEY } }
-            - name: AWS_REGION
-              valueFrom: { secretKeyRef: { name: s3-credentials, key: AWS_REGION } }
-            # Scans bucket. Not a secret, so it is a plain value rather than a
-            # secretKeyRef. This value is authoritative and overrides the
-            # image's built-in default.
-            #
-            # It used to be hardcoded in the image (users.json template and
-            # post-upload.sh), which is why the 2026-07-25 us-east-1 ->
-            # ca-central-1 migration needed an image rebuild to finish. The
-            # bucket was briefly renamed to numeriseur-scans-ca-example-com
-            # during that migration, because AWS held the old name for over
-            # half an hour after the delete; the old name was reclaimed once it
-            # freed up. Setting it here means the next move is a manifest
-            # change and a restart, nothing more.
+            # Scans bucket. Not a secret, so a plain value. Authoritative: the
+            # 2026-07-25 us-east-1 -> ca-central-1 move needed an image rebuild
+            # because this was hardcoded in the image; now it is a manifest edit.
             - name: S3_BUCKET
               value: numeriseur-scans-example-com
             - name: LUDO_PASSWORD
@@ -89,47 +61,140 @@ spec:
               valueFrom: { secretKeyRef: { name: sftp-user-passwords, key: cartes } }
             - name: PRINTER_PUBLIC_KEY
               valueFrom: { secretKeyRef: { name: printer-public-key, key: key } }
-            - name: RCLONE_CONFIG
-              value: /etc/rclone/rclone.conf
           volumeMounts:
-            - name: sftpgo-data
-              mountPath: /var/lib/sftpgo
-            - name: sftpgo-tmp
-              mountPath: /var/lib/sftpgo/tmp
-            - name: rclone-config
-              mountPath: /etc/rclone
+            - name: config
+              mountPath: /config
               readOnly: true
+            - name: runtime
+              mountPath: /runtime
+
+      containers:
+        - name: sftpgo
+          image: docker.io/drakkan/sftpgo:v2.6.4
+          # ENTRYPOINT is null and CMD is ["sftpgo","serve"], so the full argv
+          # goes here.
+          command:
+            - sftpgo
+            - serve
+            - --config-dir
+            - /var/lib/sftpgo
+            - --config-file
+            - sftpgo.json
+            - --loaddata-from
+            - /var/lib/sftpgo/users.json
+            # mode 0 updates existing users; mode 1 leaves them untouched, so
+            # password and secret changes would never apply.
+            - --loaddata-mode
+            - "0"
+          ports:
+            - containerPort: 2022
+              name: sftp
+
+          # A real httpGet, replacing three exec probes that shelled out to
+          # python3 -- which the stock image does not have.
+          #
+          # The old probes could not use httpGet because sftpgo's httpd was
+          # bound to 127.0.0.1, and opening it would have exposed the admin UI
+          # cluster-wide. It is now bound to 0.0.0.0 with enable_web_admin and
+          # enable_web_client false: /healthz answers 200 unauthenticated, the
+          # /web/* routes are never registered (404), and the REST API returns
+          # 401 with no admin account existing to authenticate as. Verified
+          # against v2.6.4 -- note that turning enable_rest_api off too makes
+          # sftpgo skip starting the HTTP server entirely, taking /healthz with
+          # it.
+          #
+          # These no longer `touch` a file first. That was there to catch a dead
+          # NFS server, because a read-only check rides the attribute cache for
+          # ~60s and keeps reporting healthy after the server is gone. There is
+          # no NFS left in this pod -- the PVC is gone -- so there is nothing
+          # for a write probe to prove.
+          startupProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
+
+          volumeMounts:
+            - name: runtime
+              mountPath: /var/lib/sftpgo
+            - name: tmp
+              mountPath: /var/lib/sftpgo/tmp
             - name: hostkeys
-              mountPath: /var/lib/sftpgo/host_keys
+              mountPath: /etc/sftpgo/host_keys
+              readOnly: true
+
       volumes:
-        - name: sftpgo-data
-          persistentVolumeClaim:
-            claimName: sftpgo-data
-        - name: sftpgo-tmp
+        # Was a 200Mi RWX-less NFS PVC (sftpgo-data). Everything that justified
+        # persisting it is gone: the hook's scratch space and rclone's rewritable
+        # config went with the hook, the host keys have been a Secret since
+        # 2026-07-21, and the sqlite provider is rebuilt from users.json on every
+        # start by --loaddata-mode 0. What was actually surviving restarts was
+        # 19 MB of sftpgo logs.
+        #
+        # This makes the workload stateless: no NFS dependency, no backup
+        # CronJob, and nothing to lose if a node dies.
+        - name: runtime
+          emptyDir: {}
+
+        # In-flight scan bytes stay in RAM rather than landing on node disk.
+        - name: tmp
           emptyDir:
             medium: Memory
             sizeLimit: 256Mi
-        - name: rclone-config
-          secret:
-            secretName: rclone-config
+
+        - name: config
+          configMap:
+            name: sftpgo-config
+
         - name: hostkeys
-          # SSH host key pair (id_rsa, id_rsa.pub, id_ed25519, id_ed25519.pub).
-          # Persisted here, not on sftpgo-data, so a data-volume reset doesn't
-          # regenerate the server identity and break the scanner's pinned
-          # server public key. Secret created out-of-band (contains private
-          # key material - not managed via this repo):
+          # SSH host key pair (id_rsa, id_ed25519 and their .pub). The scanner
+          # pins the server key, so regenerating it means a printer that stops
+          # connecting. Secret created out-of-band -- private key material, not
+          # managed in this repo:
           #   kubectl -n numeriseur create secret generic numeriseur-sftpgo-hostkeys \
           #     --from-file=id_rsa=... --from-file=id_rsa.pub=... \
           #     --from-file=id_ed25519=... --from-file=id_ed25519.pub=...
+          #
+          # 0640, not 0600: the files are owned root:1000 via fsGroup, and the
+          # process is uid 1000, so it reads them as group.
           secret:
             secretName: numeriseur-sftpgo-hostkeys
-            defaultMode: 0600
+            defaultMode: 0640
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: numeriseur-sftpgo
   namespace: numeriseur
+  annotations:
+    # Let the auto-generated svclb DaemonSet schedule onto the control-plane
+    # node as well. Without this the LoadBalancer publishes only the eight
+    # LAN node IPs, and `numeriseur.lab.example` — which resolves to cloud-01
+    # (198.51.100.7) because that is where the HTTP IngressRoute lives — answers
+    # :2022 with connection refused. The scanner is configured with the
+    # hostname, so it failed instantly with no server-side log line at all.
+    #
+    # Same mechanism traefik uses (traefik/helmchartconfig.yaml); see the
+    # README's control-plane section for why cloud-01 is tainted.
+    #
+    # NOTE ON THE DATA PATH: the printer is on the LAN and so is the pod, so a
+    # scan sent to 198.51.100.7 crosses the WireGuard tunnel to EC2 and comes
+    # straight back. It works and scans are small, but the direct route is any
+    # of the 192.0.2.x node IPs.
+    svccontroller.k3s.cattle.io/tolerations: |
+      - key: "dedicated"
+        operator: "Equal"
+        value: "controlplane"
+        effect: "NoSchedule"
 spec:
   type: LoadBalancer
   selector:

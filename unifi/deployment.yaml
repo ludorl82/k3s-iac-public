@@ -57,7 +57,7 @@ spec:
           hostnames: ["mongo"]
       containers:
         - name: mongo
-          image: mongo:4.4
+          image: mongo:8.3
           env:
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_INITDB_ROOT_USERNAME } }
@@ -80,19 +80,19 @@ spec:
           # `kubectl get pods` until the restart count moved.
           startupProbe:
             exec:
-              command: ["sh", "-c", "touch /data/db/.k8s-probe && mongo --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1"]
+              command: ["sh", "-c", "touch /data/db/.k8s-probe && mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1"]
             periodSeconds: 10
             timeoutSeconds: 10
             failureThreshold: 30
           livenessProbe:
             exec:
-              command: ["sh", "-c", "touch /data/db/.k8s-probe && mongo --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1"]
+              command: ["sh", "-c", "touch /data/db/.k8s-probe && mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1"]
             periodSeconds: 30
             timeoutSeconds: 15
             failureThreshold: 3
           readinessProbe:
             exec:
-              command: ["sh", "-c", "touch /data/db/.k8s-probe && mongo --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1"]
+              command: ["sh", "-c", "touch /data/db/.k8s-probe && mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1"]
             periodSeconds: 15
             timeoutSeconds: 10
             failureThreshold: 2

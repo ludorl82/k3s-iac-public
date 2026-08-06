@@ -19,7 +19,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: backup
-              image: mongo:4.4
+              image: mongo:8.3
               command:
                 - bash
                 - -c

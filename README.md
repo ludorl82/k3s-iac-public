@@ -37,12 +37,25 @@ Secrets are **not** stored in this repo. They're created out-of-band with `kubec
 
 ## numeriseur/
 
-Scanner ingestion pipeline: sftpgo (S3-backed, no local scan storage) + a post-upload hook that cleans up photos and pushes scans to Google Drive via rclone (no local OCR -- Google Drive OCRs PDFs on its own). Image source: [numeriseur-sftpgo](https://github.com/ludorl82/numeriseur-sftpgo).
+Scanner ingestion pipeline: sftpgo with S3-backed virtual users, so scans never touch local storage. **Stock `drakkan/sftpgo` image since 2026-08-05** — there is no image to build any more.
+
+What used to make it custom was the post-upload hook (imagemagick, rclone, awscli, openssh-client) plus the `envsubst` templating that fed it. The hook is now an EventBridge-driven Lambda in `cloud-01-iac` (`live/numeriseur.tf`): sftpgo writes to S3, S3 emits an event, the Lambda processes and pushes to Google Drive. The templating is an initContainer running the same stock image, because it only needs `bash`.
+
+**The workload is stateless.** The 200Mi NFS PVC and its nightly backup CronJob are gone: the hook's scratch space and rclone's rewritable config went with the hook, the host keys are a Secret, and the sqlite provider is rebuilt from `users.json` on every start (`--loaddata-mode 0`). What was actually surviving restarts was ~19 MB of logs.
+
+Three things worth knowing before touching it:
+
+- **The health probe depends on an unobvious config detail.** `/healthz` is only served if `enable_rest_api` is `true` on the httpd binding. Turning all three of `enable_web_admin` / `enable_web_client` / `enable_rest_api` off makes sftpgo skip starting the HTTP server entirely, and the probes then fail with no clue why. The web UI routes stay unregistered (404) and the REST API returns 401 with no admin account existing, so binding on `0.0.0.0` exposes nothing but `/healthz`.
+- **`fsGroup: 1000` is load-bearing.** The stock image runs as uid 1000 and the host-key Secret is mounted `0640`; without `fsGroup` the process cannot read its own host keys.
+- **Editing the ConfigMap does not restart anything.** The initContainer renders config at pod start only, so a ConfigMap or Secret change needs `kubectl -n numeriseur rollout restart deployment/numeriseur-sftpgo`.
 
 Secrets expected in the `numeriseur` namespace before applying:
 - `s3-credentials` (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`)
 - `sftp-user-passwords` (`ludo`, `lea`, `ludoetlea`, `photos`, `cartes`)
-- `rclone-config` (key `rclone.conf`, containing the `gdrive-ludo`/`gdrive-lea` remotes)
+- `printer-public-key` (key `key`)
+- `numeriseur-sftpgo-hostkeys` (`id_rsa`, `id_rsa.pub`, `id_ed25519`, `id_ed25519.pub` — the scanner pins the server key, so never regenerate these casually)
+
+`rclone-config` is no longer used and can be deleted once the cutover is confirmed. The Google credentials now live in AWS Secrets Manager (`numeriseur/google-drive`), not in the cluster.
 
 ## n8n/
 

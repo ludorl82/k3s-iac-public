@@ -134,6 +134,12 @@ spec:
             - name: ssh-cf-drift
               mountPath: /keys/cf-drift
               readOnly: true
+            - name: ssh-iac-updates
+              mountPath: /keys/iac-updates
+              readOnly: true
+            - name: ssh-ha-backup
+              mountPath: /keys/ha-backup
+              readOnly: true
       volumes:
         - name: cronicle-data
           persistentVolumeClaim:
@@ -208,6 +214,14 @@ spec:
         - name: ssh-cf-drift
           secret:
             secretName: cronicle-ssh-cf-drift
+            defaultMode: 0400
+        - name: ssh-iac-updates
+          secret:
+            secretName: cronicle-ssh-iac-updates
+            defaultMode: 0400
+        - name: ssh-ha-backup
+          secret:
+            secretName: cronicle-ssh-ha-backup
             defaultMode: 0400
 ---
 apiVersion: v1
