@@ -1,0 +1,9 @@
+# Canonical ingress setup per ArgoCD docs: Traefik terminates TLS, so the
+# server runs plain HTTP behind it. Behind the HTTPS backend the UI's event
+# stream never delivered and the app list sat on skeletons forever.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+data:
+  server.insecure: "true"

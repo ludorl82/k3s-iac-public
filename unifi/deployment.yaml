@@ -1,0 +1,165 @@
+# Runs mongo + unifi-network-application as two containers in one Pod
+# (mirrors the original single-host docker-compose setup) so they can talk
+# over localhost once hostNetwork is on - avoids needing cluster DNS for
+# a hostNetwork pod.
+#
+# 2026-07-24: moved from vm-02 to pi-01 (vm-02 decommissioned along
+# with srv-01's NixOS conversion) and PVCs switched from local-path to
+# nfs-client (nas:/k8s) at the same time - local-path bakes a
+# nodeAffinity into the PV pinned to whichever node first provisioned it,
+# same issue already hit and fixed for dev-labodeludo. NFS removes the
+# node-pinning problem for future moves; data copied via a one-shot pod
+# (hostPath on vm-02 + the new NFS PVCs mounted together), not by hand.
+#
+# 2026-07-24 (later same day): moved again pi-01 -> gpu-01, ahead of
+# pi-01's NixOS reimage. Thanks to the NFS switch above this was a pure
+# nodeSelector change with no data migration. Note this also moves the pod
+# from arm64 (pi-01, a Pi) to amd64 (gpu-01) - both images are multi-arch.
+#
+# The AP's inform URL was pointing at vm-02, so it had already been
+# silently orphaned by that node's removal; it is now on gpu-01's IP, and the
+# controller's override inform host (super_mgmt.hostname) is set to the same
+# so it gets re-advertised on every provision. That override MUST stay a raw
+# IP: the AP resolves via the ISP's DNS servers, not pfSense, so it cannot
+# resolve any .lab.example name - setting a hostname there pushes an
+# unresolvable URL on the next provision and strands the AP (learned the
+# hard way). Re-point the AP BEFORE retiring the node its IP names; svclb
+# listens on 8080 on every node, so any surviving node IP works.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unifi
+  namespace: unifi
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: unifi
+  template:
+    metadata:
+      labels:
+        app: unifi
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: gpu-01
+      # The migrated /config data has "mongo" baked in as the DB hostname
+      # somewhere in UniFi's own persisted config (from the original
+      # docker-compose setup, where "mongo" was a resolvable service name).
+      # MONGO_HOST=127.0.0.1 below is ignored once /config already exists
+      # from a prior install - this alias is what actually makes the
+      # connection work post-migration.
+      hostAliases:
+        - ip: "127.0.0.1"
+          hostnames: ["mongo"]
+      containers:
+        - name: mongo
+          image: mongo:8.3
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_INITDB_ROOT_USERNAME } }
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_INITDB_ROOT_PASSWORD } }
+          # Two-part probe on purpose. `ping` proves mongod is answering, but it
+          # is served from memory and stays happy with a wedged data dir — so it
+          # alone would miss exactly the NAS failure this exists for. The
+          # `touch` writes to /data/db, which is the NFS mount, and blocks in
+          # uninterruptible sleep when the NAS is gone; kubelet's timeoutSeconds
+          # turns that hang into a probe failure.
+          # `touch`, not `ls`: the 2026-07-30 NAS test showed read-only checks
+          # ride the NFS attribute cache (~60s by default) and keep reporting
+          # healthy after the server is gone. Only a write goes to the server.
+          # `db.stats()` would be the more thorough mongo-side check but it
+          # returns 0 unauthenticated here, so it is not usable as a probe.
+          # Readiness added after that test: with liveness only, a container is
+          # Ready by definition while it runs, so mongo could never *show*
+          # NotReady — it would silently restart with nothing visible in
+          # `kubectl get pods` until the restart count moved.
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "touch /data/db/.k8s-probe && mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1"]
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "touch /data/db/.k8s-probe && mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1"]
+            periodSeconds: 30
+            timeoutSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "touch /data/db/.k8s-probe && mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1"]
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 2
+          volumeMounts:
+            - name: mongo-data
+              mountPath: /data/db
+        - name: unifi-network-application
+          image: lscr.io/linuxserver/unifi-network-application:latest
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: America/Toronto
+            - name: MONGO_HOST
+              value: "127.0.0.1"
+            - name: MONGO_PORT
+              value: "27017"
+            - name: MONGO_USER
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_USER } }
+            - name: MONGO_PASS
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_PASS } }
+            - name: MONGO_DBNAME
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_DBNAME } }
+            - name: MONGO_AUTHSOURCE
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_AUTHSOURCE } }
+            - name: MONGO_STATDBNAME
+              valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_STATDBNAME } }
+          # NO PROBES HERE YET — deliberate. Attempted and reverted 2026-07-30;
+          # read this before re-adding them, because the obvious config bricks
+          # the controller in a restart loop.
+          #
+          # Attempt was httpGet /status on 8080. This pod is hostNetwork, so the
+          # kubelet probes the node address (192.0.2.129) over IPv4. Observed:
+          # two consecutive cold starts ran >18 minutes with the IPv4 listener
+          # never appearing — from inside the container ::1:8080 was OPEN while
+          # 127.0.0.1:8080 and 192.0.2.129:8080 were both closed. The startup
+          # probe therefore expired and killed the container mid-init, twice.
+          # The third start, with the probes removed, was serving in ~26s and
+          # IPv4 8080 was then open. So the IPv4 listener is real; it just does
+          # not exist during early startup, and a probe against it converts a
+          # slow start into an infinite kill loop.
+          #
+          # What it was NOT: not an NFS hang (java stayed `Ssl`, burning CPU, no
+          # errors logged) and not a post-upgrade migration (server_version and
+          # uuid were identical before and after, and the log said "no
+          # migrations found"). **Why those two starts took >18 minutes when the
+          # next took 26 seconds is still unexplained** — do not assume it was
+          # one-time. Data survived intact: 1 device, 2 sites, 26 users, checked
+          # against the `unifi` db afterwards (note: NOT `ace` — the db name
+          # comes from MONGO_DBNAME in the unifi-credentials secret, and
+          # querying `ace` returns zeros and looks like catastrophic data loss).
+          #
+          # Before re-adding: measure a genuine cold start (delete the pod, time
+          # until 192.0.2.129:8080 accepts a connection) and set
+          # failureThreshold from that with a wide margin, or skip startupProbe
+          # and use a liveness probe with a large initialDelaySeconds. Verify
+          # against a freshly started pod, never a long-running one — curling a
+          # warm pod through the Service is exactly what made this look safe.
+          volumeMounts:
+            - name: config-data
+              mountPath: /config
+      volumes:
+        - name: mongo-data
+          persistentVolumeClaim:
+            claimName: unifi-mongo-data-nfs
+        - name: config-data
+          persistentVolumeClaim:
+            claimName: unifi-config-data-nfs

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Self-hosted Renovate, run weekly from bastion (scripts/renovate-run.sh, Cronicle-triggered). Opens tag-bump PRs for container images; merge = deploy via Argo CD.",
+  "enabledManagers": [
+    "kubernetes",
+    "kustomize"
+  ],
+  "kubernetes": {
+    "managerFilePatterns": [
+      "/\\.yaml$/"
+    ]
+  },
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 5,
+  "labels": [
+    "renovate"
+  ],
+  "dependencyDashboard": true,
+  "rangeStrategy": "pin",
+  "packageRules": [
+    {
+      "description": "Group all patch/minor image bumps into one weekly PR; majors stay individual PRs read with coffee",
+      "matchUpdateTypes": [
+        "patch",
+        "minor"
+      ],
+      "groupName": "weekly image updates"
+    },
+    {
+      "description": "Majors wait on the Dependency Dashboard until explicitly approved — a major upgrade is a decision, not a Sunday surprise (lesson of 2026-07-31)",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Database majors never come from a bot: mongo upgrades are one-major-at-a-time maintenances with an FCV runbook (see history.md 2026-07-31)",
+      "matchPackageNames": [
+        "mongo"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    }
+  ],
+  "separateMultipleMajor": true
+}

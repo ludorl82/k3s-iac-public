@@ -1,0 +1,27 @@
+# Pinned host keys for every SSH target Cronicle reaches (mounted at
+# /keys/known_hosts by deployment.yaml). Name is historical -- it predates
+# the bastion split and holds the whole fleet, not just bastion.
+#
+# bastion.lab.example = pi-02's keys (the bastion alias, 2026-08-07 split).
+# bastion.lab.example currently ALSO = pi-02; it repoints to the console VM
+# at cutover, at which point its key lines here change to the VM's.
+# The dead Pi-4 key and the 192.0.2.33 leftovers (reverted bc016ca) were
+# dropped when this object moved into git.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bastion-known-hosts
+  namespace: cronicle
+data:
+  known_hosts: |
+    cloud-01.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    gpu-02.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    pi-01.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    pi-02.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    vm-01.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    vm-02.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    vm-03.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    bastion.lab.example,bastion ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    bastion.lab.example,bastion ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    bastion.lab.example,bastion ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    bastion.lab.example,bastion ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example

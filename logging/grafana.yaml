@@ -1,0 +1,162 @@
+# Grafana, migrated 2026-07-22 from the docker container on cloud-01
+# (~/loki-docker). The data volume (sqlite db: dashboards, users, prefs) was
+# tarred off the cloud-01 docker volume and unpacked into the local-path PVC dir
+# on gpu-01 during cutover. Datasource is provisioned to the in-namespace loki
+# Service. Pinned to gpu-01 for the same reasons as loki.yaml.
+# grafana.lab.example is a pfSense/Unbound host override (-> cp-1), NOT a
+# Cloudflare record; the grafana.pub.example.com OTP twin arrives via the cloud-01
+# tunnel -> cloud-01 Traefik -> https://cp-1 hop (cloud-01 grafana.yml, netbox.yml
+# pattern).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: logging
+data:
+  loki.yaml: |
+    apiVersion: 1
+
+    datasources:
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki:3100
+        isDefault: true
+        editable: true
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data-nfs
+  namespace: logging
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: logging
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      securityContext:
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:13.1.1
+          env:
+            - name: GF_SERVER_ROOT_URL
+              value: https://grafana.lab.example
+          ports:
+            - { name: http, containerPort: 3000 }
+          # /api/health reports sqlite status ("database": "ok"), not just "the
+          # HTTP server answers" — so it fails when the NFS-backed db is wedged,
+          # which a liveness probe on a static endpoint would sail straight past.
+          # Readiness alone was the old config, and it is why the 2026-07-25 NAS
+          # reboot left grafana NotReady but Running forever: nothing restarts it.
+          startupProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: grafana-data-nfs
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: logging
+spec:
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: logging
+spec:
+  redirectScheme:
+    permanent: true
+    scheme: https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: grafana
+  namespace: logging
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`grafana.lab.example`) || Host(`grafana.pub.example.com`)
+      middlewares:
+        - name: redirect-to-https
+      services:
+        - name: grafana
+          port: 3000
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: grafana-secure
+  namespace: logging
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`grafana.lab.example`) || Host(`grafana.pub.example.com`)
+      services:
+        - name: grafana
+          port: 3000
+  tls: {}

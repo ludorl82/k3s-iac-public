@@ -1,0 +1,105 @@
+# ntfy — self-hosted push notification server, the delivery leg of the
+# Uptime Kuma alerting stack. Migrated from Docker on cloud-01 (~/ntfy-docker) into
+# k3s on 2026-07-25, but deliberately pinned back onto the `cloud-01` node: the
+# whole point of this stack is to still alert when the home network is down,
+# so it must not be schedulable onto a home node. The controlplane toleration
+# is what lets it land on cloud-01 at all (that node carries
+# dedicated=controlplane:NoSchedule).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ntfy-config
+  namespace: ntfy
+data:
+  server.yml: |
+    base-url: "https://ntfy.pub.example.com"
+    listen-http: ":80"
+    behind-proxy: true
+    cache-file: "/var/lib/ntfy/cache.db"
+    auth-file: "/var/lib/ntfy/auth.db"
+    auth-default-access: "deny-all"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntfy
+  namespace: ntfy
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ntfy
+  template:
+    metadata:
+      labels:
+        app: ntfy
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cloud-01
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: controlplane
+          effect: NoSchedule
+      containers:
+        - name: ntfy
+          image: binwiederhier/ntfy:latest
+          args:
+            - serve
+          ports:
+            - containerPort: 80
+              name: http
+          # local-path on the cloud-01 node (EBS), not NFS — hygiene rather than
+          # NAS-outage cover, but ntfy carries every alert in the fleet, so a
+          # silently wedged one means no alerts about anything.
+          startupProbe:
+            httpGet: { path: /v1/health, port: 80 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /v1/health, port: 80 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /v1/health, port: 80 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ntfy/server.yml
+              subPath: server.yml
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/ntfy
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: ntfy-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: ntfy-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntfy
+  namespace: ntfy
+spec:
+  type: ClusterIP
+  selector:
+    app: ntfy
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

@@ -1,0 +1,271 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cronicle-job-trigger
+  namespace: cronicle
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cronicle-job-trigger
+  namespace: unifi
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cronicle-job-trigger
+  namespace: unifi
+subjects:
+  - kind: ServiceAccount
+    name: cronicle-job-trigger
+    namespace: cronicle
+roleRef:
+  kind: Role
+  name: cronicle-job-trigger
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cronicle-job-trigger
+  namespace: iac-drift
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cronicle-job-trigger
+  namespace: iac-drift
+subjects:
+  - kind: ServiceAccount
+    name: cronicle-job-trigger
+    namespace: cronicle
+roleRef:
+  kind: Role
+  name: cronicle-job-trigger
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cronicle-job-trigger
+  namespace: kuma
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cronicle-job-trigger
+  namespace: kuma
+subjects:
+  - kind: ServiceAccount
+    name: cronicle-job-trigger
+    namespace: cronicle
+roleRef:
+  kind: Role
+  name: cronicle-job-trigger
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cronicle-job-trigger
+  namespace: ntfy
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cronicle-job-trigger
+  namespace: ntfy
+subjects:
+  - kind: ServiceAccount
+    name: cronicle-job-trigger
+    namespace: cronicle
+roleRef:
+  kind: Role
+  name: cronicle-job-trigger
+  apiGroup: rbac.authorization.k8s.io
+---
+# Cronicle backs itself up. Living in this namespace grants the SA nothing on
+# its own, so it needs the same explicit Role here as anywhere else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cronicle-job-trigger
+  namespace: cronicle
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cronicle-job-trigger
+  namespace: cronicle
+subjects:
+  - kind: ServiceAccount
+    name: cronicle-job-trigger
+    namespace: cronicle
+roleRef:
+  kind: Role
+  name: cronicle-job-trigger
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cronicle-job-trigger
+  namespace: logging
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cronicle-job-trigger
+  namespace: logging
+subjects:
+  - kind: ServiceAccount
+    name: cronicle-job-trigger
+    namespace: cronicle
+roleRef:
+  kind: Role
+  name: cronicle-job-trigger
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cronicle-job-trigger
+  namespace: n8n
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cronicle-job-trigger
+  namespace: n8n
+subjects:
+  - kind: ServiceAccount
+    name: cronicle-job-trigger
+    namespace: cronicle
+roleRef:
+  kind: Role
+  name: cronicle-job-trigger
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cronicle-job-trigger
+  namespace: numeriseur
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cronicle-job-trigger
+  namespace: numeriseur
+subjects:
+  - kind: ServiceAccount
+    name: cronicle-job-trigger
+    namespace: cronicle
+roleRef:
+  kind: Role
+  name: cronicle-job-trigger
+  apiGroup: rbac.authorization.k8s.io

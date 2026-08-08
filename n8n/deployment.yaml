@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n
+  namespace: n8n
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: n8n
+  template:
+    metadata:
+      labels:
+        app: n8n
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: n8n
+          image: docker.n8n.io/n8nio/n8n:latest
+          ports:
+            - containerPort: 5678
+              name: http
+          env:
+            - name: N8N_HOST
+              value: "n8n.pub.example.com"
+            - name: N8N_PORT
+              value: "5678"
+            - name: N8N_PROTOCOL
+              value: "https"
+            - name: N8N_EDITOR_BASE_URL
+              value: "https://n8n.pub.example.com/"
+            - name: WEBHOOK_URL
+              value: "https://n8n.pub.example.com/"
+            - name: N8N_SECURE_COOKIE
+              value: "false"
+            - name: GENERIC_TIMEZONE
+              value: "America/Toronto"
+            - name: N8N_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: n8n-secrets, key: encryption-key } }
+          # /healthz proves only that the process answers; /healthz/readiness
+          # checks the sqlite connection, which is what dies when the NFS mount
+          # under /home/node/.n8n goes away. Liveness uses the DB-checking one on
+          # purpose — a probe that cannot see the storage cannot catch the
+          # Running-but-dead state the 2026-07-25 NAS reboot produced.
+          startupProbe:
+            httpGet: { path: /healthz, port: 5678 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /healthz/readiness, port: 5678 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /healthz/readiness, port: 5678 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
+          volumeMounts:
+            - name: n8n-data
+              mountPath: /home/node/.n8n
+      volumes:
+        - name: n8n-data
+          persistentVolumeClaim:
+            claimName: n8n-data-nfs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: n8n
+  namespace: n8n
+spec:
+  type: ClusterIP
+  selector:
+    app: n8n
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5678

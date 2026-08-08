@@ -1,0 +1,46 @@
+# Cluster DNS customisation, via the extension point k3s itself provides.
+#
+# We used to own the main `coredns` ConfigMap and set `forward . 192.0.2.254`
+# in its Corefile. That could not hold: k3s rewrites
+# /var/lib/rancher/k3s/server/manifests/coredns.yaml on *every server start*
+# and its deploy controller reapplies it, resetting the Corefile to stock. The
+# 2026-07-26 and 2026-07-27 coredns drift alerts were both exactly this,
+# minutes after a k3s restart -- the check was right every time, and
+# reapplying our version only ever bought time until the next restart.
+#
+# The coredns Deployment mounts this ConfigMap at /etc/coredns/custom
+# (optional: true), and the stock Corefile ends with
+#   import /etc/coredns/custom/*.server
+# outside the .:53 block. So a `*.server` key here is a full server block that
+# k3s never touches. This is the supported way to extend k3s's coredns, and it
+# survives restarts and k3s upgrades.
+#
+# Only lab.example is declared. It is the private zone, served solely by pfSense
+# Unbound overrides with zero Cloudflare records -- nothing else can answer it.
+# Everything else is deliberately left to the stock `forward . /etc/resolv.conf`
+# catch-all, which resolves public names correctly from any node.
+#
+# Why not a `*.override` for the catch-all instead: CoreDNS rejects two
+# `forward` plugins for the same zone in one server block, so the stock
+# `forward .` cannot be overridden this way. Declaring the private zone
+# separately is what the mechanism is actually for.
+#
+# Node-dependence, worth knowing: the catch-all follows whichever node coredns
+# runs on. On a homelab node that is pfSense; on cloud-01 it would be the VPC
+# resolver 198.51.100.2, which cannot answer lab.example. coredns cannot schedule
+# on cloud-01 today -- cloud-01 is tainted `dedicated=controlplane:NoSchedule` and
+# coredns only tolerates CriticalAddonsOnly and
+# node-role.kubernetes.io/control-plane -- but declaring lab.example explicitly
+# here means the private zone keeps resolving even if that ever changes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  lab.example.server: |
+    lab.example:53 {
+        errors
+        cache 30
+        forward . 192.0.2.254
+    }

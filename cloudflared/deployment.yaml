@@ -1,0 +1,66 @@
+# Second Cloudflare tunnel ("k3s", id 00000000-0000-0000-0000-000000000000),
+# added 2026-07-22 so the cluster's public .pub.example.com twins (+ dev.labodeludo.dev)
+# no longer transit the cloud-01 host (tunnel -> cloud-01 Traefik -> insecureSkipVerify
+# -> cp-1). Edge -> these replicas -> in-cluster Traefik directly.
+# Tunnel ingress rules are remote-managed (Cloudflare dashboard/API), NOT here:
+# each hostname -> https://traefik.kube-system.svc.cluster.local:443 with
+# noTLSVerify (Traefik's default cert is the private-CA *.lab.example wildcard,
+# same trust gap the cloud-01 hop had - one hop fewer though). unifi.pub.example.com
+# bypasses Traefik and goes straight to the UniFi controller, which serves its
+# own TLS: https://unifi.unifi.svc.cluster.local:8443 with noTLSVerify. It used
+# to point at the raw node IP of whichever node ran the hostNetwork pod
+# (vm-02:8443), which broke silently when that node was decommissioned -
+# fixed 2026-07-24 to the Service DNS name so node moves can't strand it again.
+# dev.labodeludo.dev goes to Traefik's web entrypoint (it serves plain HTTP).
+# This is now the ONLY tunnel: the cloud-01 docker one (22222222) was deleted
+# 2026-08-06 and its hostnames moved here (see keepass-webdav/ and plex/).
+# router.pub.example.com and ha-01.family.example are dialled directly at their
+# LAN addresses - they are not cluster workloads and have no IngressRoute.
+# HA comes from 2 replicas on different nodes (required anti-affinity), each
+# holding its own set of edge connections - not from a second tunnel per
+# hostname (same-FQDN-multi-tunnel needs the paid Load Balancer product).
+# TUNNEL_TOKEN lives in the cloudflared-token Secret (created imperatively,
+# fetched via the cfd_tunnel/<id>/token API - never in git).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cloudflared
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: cloudflared
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          args:
+            - tunnel
+            - --no-autoupdate
+            - run
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom: { secretKeyRef: { name: cloudflared-token, key: TUNNEL_TOKEN } }
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
