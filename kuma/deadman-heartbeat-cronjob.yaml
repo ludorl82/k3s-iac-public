@@ -1,0 +1,47 @@
+# Cluster half of the external dead-man's switch (cloud-01-iac live/deadman.tf).
+# Writes deadman/cluster.heartbeat to S3 every 5 minutes; an out-of-VPC
+# Lambda alerts via SNS email when it goes stale (>30 min). A working write
+# proves scheduling, DNS, egress and the API server — the things Kuma can't
+# report on when they take Kuma down with them. Lives in the kuma namespace
+# to reuse the homelab-backup-s3-credentials secret — the same shared IAM
+# user the pi-02 house heartbeat uses, now carrying a separate
+# deadman-heartbeat-write policy (cloud-01-iac).
+#
+# Target bucket is deadman-example-com, NOT the backups bucket: these
+# writes overwrite the same key every 5 minutes, and Object Lock on a
+# backups bucket cannot coexist with that — a locked version can't be
+# reclaimed by lifecycle, so they pile up. See cloud-01-iac live/s3.tf.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: deadman-heartbeat
+  namespace: kuma
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 240
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: heartbeat
+              image: amazon/cloud-01-cli:2.36.19
+              command:
+                - /bin/sh
+                - -c
+                - date -u +%FT%TZ | cloud-01 s3 cp - s3://deadman-example-com/deadman/cluster.heartbeat
+              env:
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_ACCESS_KEY_ID } }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_SECRET_ACCESS_KEY } }
+                - name: AWS_REGION
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_REGION } }
+              resources:
+                requests: { cpu: 10m, memory: 64Mi }
+                limits: { memory: 256Mi }

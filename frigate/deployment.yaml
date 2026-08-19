@@ -1,0 +1,95 @@
+# Frigate NVR, migrated from a docker-compose-style container on gpu-02.
+# Stays pinned to gpu-02 on purpose:
+#   - the RTX 3060 (ONNX detector w/ TensorRT EP + NVDEC hwaccel) is there,
+#   - /home/ludorl82/opt/frigate holds config + ~78G of recordings on local
+#     disk, and the Cronicle sync/backup/watchdog jobs (frigate_nas_backup,
+#     lowres sync/prune, recording watchdog) all SSH to gpu-02 and operate
+#     on those same host paths - hostPath keeps them working unchanged.
+# hostNetwork keeps 1984/5000/8554/8555 bound on gpu-02's IP so the
+# recording watchdog (127.0.0.1:5000), HA and any RTSP/WebRTC consumers see
+# the exact same endpoints as before the migration.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frigate
+  namespace: frigate
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: frigate
+  template:
+    metadata:
+      labels:
+        app: frigate
+    spec:
+      # nvidia-cdi, not nvidia: gpu-02 is NixOS and only the CDI variant
+      # mounts the driver userspace. See frigate/runtimeclass.yaml.
+      runtimeClassName: nvidia-cdi
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: gpu-02
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: frigate
+          effect: NoSchedule
+      containers:
+        - name: frigate
+          image: ghcr.io/blakeblackshear/frigate:0.17.2-tensorrt
+          env:
+            - name: FRIGATE_RTSP_USER
+              valueFrom: { secretKeyRef: { name: frigate-credentials, key: FRIGATE_RTSP_USER } }
+            - name: FRIGATE_RTSP_PASSWORD
+              valueFrom: { secretKeyRef: { name: frigate-credentials, key: FRIGATE_RTSP_PASSWORD } }
+            - name: PLUS_API_KEY
+              valueFrom: { secretKeyRef: { name: frigate-credentials, key: PLUS_API_KEY } }
+          ports:
+            - { name: api, containerPort: 5000 }
+            - { name: go2rtc, containerPort: 1984 }
+            - { name: rtsp, containerPort: 8554 }
+            - { name: webrtc-tcp, containerPort: 8555 }
+            - { name: webrtc-udp, containerPort: 8555, protocol: UDP }
+          livenessProbe:
+            httpGet:
+              path: /api/version
+              port: 5000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/version
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: media
+              mountPath: /media/frigate
+            - name: localtime
+              mountPath: /etc/localtime
+              readOnly: true
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: config
+          hostPath:
+            path: /home/ludorl82/opt/frigate/docker
+            type: Directory
+        - name: media
+          hostPath:
+            path: /home/ludorl82/opt/frigate/data
+            type: Directory
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
+            type: File
+        # matches the old docker shm_size: 512mb
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi

@@ -1,0 +1,53 @@
+# httpd.conf for the WebDAV endpoint, copied verbatim from the retired
+# cloud-01:~/web-docker/webdav/httpd.conf (2026-08-06 tunnel consolidation).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: httpd-conf
+  namespace: keepass-webdav
+data:
+  httpd.conf: |
+    ServerRoot "/usr/local/apache2"
+    Listen 8080
+    ServerName vault.family.example
+    PidFile /tmp/httpd.pid
+
+    LoadModule mpm_event_module modules/mod_mpm_event.so
+    LoadModule unixd_module modules/mod_unixd.so
+    LoadModule authz_core_module modules/mod_authz_core.so
+    LoadModule log_config_module modules/mod_log_config.so
+    LoadModule headers_module modules/mod_headers.so
+    LoadModule dav_module modules/mod_dav.so
+    LoadModule dav_fs_module modules/mod_dav_fs.so
+    LoadModule dav_lock_module modules/mod_dav_lock.so
+
+    ErrorLog /proc/self/fd/2
+    LogLevel warn
+    LogFormat "%h %t \"%r\" %>s %b" common
+    CustomLog /proc/self/fd/1 common
+
+    # WebDAV MOVE/COPY fix for running behind a TLS-terminating reverse proxy:
+    # clients send Destination: https://vault.family.example/... but Apache serves http on :8080,
+    # and mod_dav returns 502 on the scheme/port mismatch. Rewrite Destination to the backend.
+    RequestHeader edit Destination ^https://([^/]+)/ http://$1:8080/
+
+    DavLockDB /tmp/DavLock
+
+    DocumentRoot "/data"
+
+    # Default: deny everything (protects any other files in the dir).
+    # Allow OPTIONS so WebDAV clients can probe capabilities without listing files.
+    <Directory "/data">
+        Dav On
+        Options None
+        AllowOverride None
+        Require all denied
+        <Limit OPTIONS>
+            Require all granted
+        </Limit>
+    </Directory>
+
+    # Expose these DBs only (and their atomic-save temp files like *.kdbx.tmp).
+    <LocationMatch "^/(ludovic|parola|lea|finances|danielle|louis)\.kdbx">
+        Require all granted
+    </LocationMatch>

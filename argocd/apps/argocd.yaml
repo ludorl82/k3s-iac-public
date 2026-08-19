@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:ludorl82/k3s-iac.git
+    targetRevision: main
+    path: argocd/install
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  # Apply on merge only (automated, no prune, no selfHeal): live drift is
+  # shown, never reverted — operator state is not drift.
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - RespectIgnoreDifferences=true
+      # The applicationsets CRD exceeds the client-side-apply annotation
+      # limit (262144 bytes) — the same reason the initial install needed
+      # kubectl --server-side. Argo must apply itself the same way.
+      - ServerSideApply=true
+  # replicas is operator state (maintenance scale-to-zero is intent, not
+  # drift) — never part of the diff, never reverted by a sync.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/replicas

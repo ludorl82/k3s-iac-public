@@ -1,0 +1,47 @@
+# plex.lab.example (LAN, wildcard-lab-example default cert) and plex.pub.example.com (public,
+# via the k3s tunnel). Same shape as every other service here.
+#
+# plex.pub.example.com is geo-restricted to Canada by a Cloudflare edge rule shared with
+# ntfy.pub.example.com — that lives in cloudflare-iac/live/rulesets.tf, not here.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: plex
+spec:
+  redirectScheme:
+    permanent: true
+    scheme: https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: plex
+  namespace: plex
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`plex.lab.example`) || Host(`plex.pub.example.com`)
+      middlewares:
+        - name: redirect-to-https
+      services:
+        - name: plex
+          port: 32400
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: plex-secure
+  namespace: plex
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`plex.lab.example`) || Host(`plex.pub.example.com`)
+      services:
+        - name: plex
+          port: 32400
+  tls: {}

@@ -1,0 +1,1038 @@
+{
+  "edges": [
+    {
+      "from": "app:access-audit",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:access-audit/cloudflare-access-gating-audit",
+      "kind": "part-of",
+      "to": "app:access-audit"
+    },
+    {
+      "from": "app:argocd",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "route:argocd/argocd",
+      "kind": "part-of",
+      "to": "app:argocd"
+    },
+    {
+      "from": "route:argocd/argocd-tls",
+      "kind": "part-of",
+      "to": "app:argocd"
+    },
+    {
+      "from": "app:cloudflared",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:cloudflared/cloudflared-cloud-01",
+      "kind": "part-of",
+      "to": "app:cloudflared"
+    },
+    {
+      "from": "workload:cloudflared/cloudflared-cloud-01",
+      "kind": "pinned-to",
+      "to": "host:cloud-01"
+    },
+    {
+      "from": "workload:cloudflared/cloudflared",
+      "kind": "part-of",
+      "to": "app:cloudflared"
+    },
+    {
+      "from": "app:cluster-dns",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "app:cronicle",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:cronicle/cronicle",
+      "kind": "part-of",
+      "to": "app:cronicle"
+    },
+    {
+      "from": "route:cronicle/cronicle",
+      "kind": "part-of",
+      "to": "app:cronicle"
+    },
+    {
+      "from": "route:cronicle/cronicle-secure",
+      "kind": "part-of",
+      "to": "app:cronicle"
+    },
+    {
+      "from": "app:frigate",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:frigate/frigate",
+      "kind": "part-of",
+      "to": "app:frigate"
+    },
+    {
+      "from": "workload:frigate/frigate",
+      "kind": "pinned-to",
+      "to": "host:gpu-02"
+    },
+    {
+      "from": "route:frigate/frigate",
+      "kind": "part-of",
+      "to": "app:frigate"
+    },
+    {
+      "from": "route:frigate/frigate-secure",
+      "kind": "part-of",
+      "to": "app:frigate"
+    },
+    {
+      "from": "app:keepass-webdav",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:keepass-webdav/webdav",
+      "kind": "part-of",
+      "to": "app:keepass-webdav"
+    },
+    {
+      "from": "workload:keepass-webdav/webdav",
+      "kind": "pinned-to",
+      "to": "host:cloud-01"
+    },
+    {
+      "from": "route:keepass-webdav/webdav-secure",
+      "kind": "part-of",
+      "to": "app:keepass-webdav"
+    },
+    {
+      "from": "app:kuma",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:kuma/kuma-backup",
+      "kind": "part-of",
+      "to": "app:kuma"
+    },
+    {
+      "from": "workload:kuma/kuma-backup",
+      "kind": "pinned-to",
+      "to": "host:cloud-01"
+    },
+    {
+      "from": "workload:kuma/deadman-heartbeat",
+      "kind": "part-of",
+      "to": "app:kuma"
+    },
+    {
+      "from": "workload:kuma/uptime-kuma",
+      "kind": "part-of",
+      "to": "app:kuma"
+    },
+    {
+      "from": "workload:kuma/uptime-kuma",
+      "kind": "pinned-to",
+      "to": "host:cloud-01"
+    },
+    {
+      "from": "route:kuma/kuma",
+      "kind": "part-of",
+      "to": "app:kuma"
+    },
+    {
+      "from": "route:kuma/kuma-secure",
+      "kind": "part-of",
+      "to": "app:kuma"
+    },
+    {
+      "from": "app:labodeludo",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:labodeludo/gh-runner",
+      "kind": "part-of",
+      "to": "app:labodeludo"
+    },
+    {
+      "from": "app:logging",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:logging/alloy",
+      "kind": "part-of",
+      "to": "app:logging"
+    },
+    {
+      "from": "workload:logging/grafana-backup",
+      "kind": "part-of",
+      "to": "app:logging"
+    },
+    {
+      "from": "workload:logging/grafana",
+      "kind": "part-of",
+      "to": "app:logging"
+    },
+    {
+      "from": "route:logging/grafana",
+      "kind": "part-of",
+      "to": "app:logging"
+    },
+    {
+      "from": "route:logging/grafana-secure",
+      "kind": "part-of",
+      "to": "app:logging"
+    },
+    {
+      "from": "workload:logging/loki",
+      "kind": "part-of",
+      "to": "app:logging"
+    },
+    {
+      "from": "route:logging/loki",
+      "kind": "part-of",
+      "to": "app:logging"
+    },
+    {
+      "from": "app:n8n",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:n8n/n8n-backup",
+      "kind": "part-of",
+      "to": "app:n8n"
+    },
+    {
+      "from": "workload:n8n/n8n",
+      "kind": "part-of",
+      "to": "app:n8n"
+    },
+    {
+      "from": "route:n8n/n8n",
+      "kind": "part-of",
+      "to": "app:n8n"
+    },
+    {
+      "from": "route:n8n/n8n-secure",
+      "kind": "part-of",
+      "to": "app:n8n"
+    },
+    {
+      "from": "app:ntfy",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:ntfy/ntfy-backup",
+      "kind": "part-of",
+      "to": "app:ntfy"
+    },
+    {
+      "from": "workload:ntfy/ntfy-backup",
+      "kind": "pinned-to",
+      "to": "host:cloud-01"
+    },
+    {
+      "from": "workload:ntfy/ntfy",
+      "kind": "part-of",
+      "to": "app:ntfy"
+    },
+    {
+      "from": "workload:ntfy/ntfy",
+      "kind": "pinned-to",
+      "to": "host:cloud-01"
+    },
+    {
+      "from": "route:ntfy/ntfy",
+      "kind": "part-of",
+      "to": "app:ntfy"
+    },
+    {
+      "from": "route:ntfy/ntfy-secure",
+      "kind": "part-of",
+      "to": "app:ntfy"
+    },
+    {
+      "from": "app:numeriseur",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:numeriseur/numeriseur-sftpgo",
+      "kind": "part-of",
+      "to": "app:numeriseur"
+    },
+    {
+      "from": "app:plex",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "route:plex/plex",
+      "kind": "part-of",
+      "to": "app:plex"
+    },
+    {
+      "from": "route:plex/plex-secure",
+      "kind": "part-of",
+      "to": "app:plex"
+    },
+    {
+      "from": "app:traefik",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "app:unifi",
+      "kind": "part-of",
+      "to": "cluster:k3s"
+    },
+    {
+      "from": "workload:unifi/unifi",
+      "kind": "part-of",
+      "to": "app:unifi"
+    },
+    {
+      "from": "workload:unifi/unifi",
+      "kind": "pinned-to",
+      "to": "host:gpu-01"
+    },
+    {
+      "from": "route:unifi/unifi",
+      "kind": "part-of",
+      "to": "app:unifi"
+    },
+    {
+      "from": "route:unifi/unifi-secure",
+      "kind": "part-of",
+      "to": "app:unifi"
+    },
+    {
+      "from": "workload:unifi/unifi-mongo-backup",
+      "kind": "part-of",
+      "to": "app:unifi"
+    },
+    {
+      "from": "app:logging",
+      "kind": "uses",
+      "to": "external:nas"
+    },
+    {
+      "from": "app:n8n",
+      "kind": "uses",
+      "to": "external:nas"
+    },
+    {
+      "from": "app:plex",
+      "kind": "uses",
+      "to": "external:nas"
+    },
+    {
+      "from": "app:unifi",
+      "kind": "uses",
+      "to": "external:nas"
+    }
+  ],
+  "layer": "cluster",
+  "nodes": [
+    {
+      "id": "cluster:k3s",
+      "kind": "cluster",
+      "label": "k3s",
+      "layer": "cluster",
+      "meta": {},
+      "source": "argocd/README.md"
+    },
+    {
+      "id": "app:access-audit",
+      "kind": "app",
+      "label": "access-audit",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "access-audit",
+        "path": "access-audit"
+      },
+      "source": "argocd/apps/access-audit.yaml"
+    },
+    {
+      "id": "workload:access-audit/cloudflare-access-gating-audit",
+      "kind": "workload",
+      "label": "cloudflare-access-gating-audit",
+      "layer": "cluster",
+      "meta": {
+        "kind": "CronJob"
+      },
+      "source": "access-audit/cronjob.yaml"
+    },
+    {
+      "id": "app:argocd",
+      "kind": "app",
+      "label": "argocd",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "argocd",
+        "path": "argocd/install"
+      },
+      "source": "argocd/apps/argocd.yaml"
+    },
+    {
+      "id": "route:argocd/argocd",
+      "kind": "route",
+      "label": "argocd",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "argocd.lab.example"
+        ]
+      },
+      "source": "argocd/install/ingressroute.yaml"
+    },
+    {
+      "id": "route:argocd/argocd-tls",
+      "kind": "route",
+      "label": "argocd-tls",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "argocd.lab.example"
+        ]
+      },
+      "source": "argocd/install/ingressroute.yaml"
+    },
+    {
+      "id": "app:cloudflared",
+      "kind": "app",
+      "label": "cloudflared",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "cloudflared",
+        "path": "cloudflared"
+      },
+      "source": "argocd/apps/cloudflared.yaml"
+    },
+    {
+      "id": "workload:cloudflared/cloudflared-cloud-01",
+      "kind": "workload",
+      "label": "cloudflared-cloud-01",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "cloudflared/deployment-aws.yaml"
+    },
+    {
+      "id": "workload:cloudflared/cloudflared",
+      "kind": "workload",
+      "label": "cloudflared",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "cloudflared/deployment.yaml"
+    },
+    {
+      "id": "app:cluster-dns",
+      "kind": "app",
+      "label": "cluster-dns",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "kube-system",
+        "path": "cluster-dns"
+      },
+      "source": "argocd/apps/cluster-dns.yaml"
+    },
+    {
+      "id": "app:cronicle",
+      "kind": "app",
+      "label": "cronicle",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "cronicle",
+        "path": "cronicle",
+        "s3Refs": [
+          "cronicle-data-example-com"
+        ]
+      },
+      "source": "argocd/apps/cronicle.yaml"
+    },
+    {
+      "id": "workload:cronicle/cronicle",
+      "kind": "workload",
+      "label": "cronicle",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "cronicle/deployment.yaml"
+    },
+    {
+      "id": "route:cronicle/cronicle",
+      "kind": "route",
+      "label": "cronicle",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "cronicle.lab.example",
+          "cronicle.pub.example.com"
+        ]
+      },
+      "source": "cronicle/ingressroute.yaml"
+    },
+    {
+      "id": "route:cronicle/cronicle-secure",
+      "kind": "route",
+      "label": "cronicle-secure",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "cronicle.lab.example",
+          "cronicle.pub.example.com"
+        ]
+      },
+      "source": "cronicle/ingressroute.yaml"
+    },
+    {
+      "id": "app:frigate",
+      "kind": "app",
+      "label": "frigate",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "frigate",
+        "path": "frigate"
+      },
+      "source": "argocd/apps/frigate.yaml"
+    },
+    {
+      "id": "workload:frigate/frigate",
+      "kind": "workload",
+      "label": "frigate",
+      "layer": "cluster",
+      "meta": {
+        "hostNetwork": true,
+        "kind": "Deployment"
+      },
+      "source": "frigate/deployment.yaml"
+    },
+    {
+      "id": "route:frigate/frigate",
+      "kind": "route",
+      "label": "frigate",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "frigate.lab.example",
+          "frigate.pub.example.com"
+        ]
+      },
+      "source": "frigate/ingressroute.yaml"
+    },
+    {
+      "id": "route:frigate/frigate-secure",
+      "kind": "route",
+      "label": "frigate-secure",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "frigate.lab.example",
+          "frigate.pub.example.com"
+        ]
+      },
+      "source": "frigate/ingressroute.yaml"
+    },
+    {
+      "id": "app:keepass-webdav",
+      "kind": "app",
+      "label": "keepass-webdav",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "keepass-webdav",
+        "path": "keepass-webdav"
+      },
+      "source": "argocd/apps/keepass-webdav.yaml"
+    },
+    {
+      "id": "workload:keepass-webdav/webdav",
+      "kind": "workload",
+      "label": "webdav",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "keepass-webdav/deployment.yaml"
+    },
+    {
+      "id": "route:keepass-webdav/webdav-secure",
+      "kind": "route",
+      "label": "webdav-secure",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "vault.family.example"
+        ]
+      },
+      "source": "keepass-webdav/ingressroute.yaml"
+    },
+    {
+      "id": "app:kuma",
+      "kind": "app",
+      "label": "kuma",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "kuma",
+        "path": "kuma",
+        "s3Refs": [
+          "deadman-example-com",
+          "homelab-backups-example-com"
+        ]
+      },
+      "source": "argocd/apps/kuma.yaml"
+    },
+    {
+      "id": "workload:kuma/kuma-backup",
+      "kind": "workload",
+      "label": "kuma-backup",
+      "layer": "cluster",
+      "meta": {
+        "kind": "CronJob"
+      },
+      "source": "kuma/backup-cronjob.yaml"
+    },
+    {
+      "id": "workload:kuma/deadman-heartbeat",
+      "kind": "workload",
+      "label": "deadman-heartbeat",
+      "layer": "cluster",
+      "meta": {
+        "kind": "CronJob"
+      },
+      "source": "kuma/deadman-heartbeat-cronjob.yaml"
+    },
+    {
+      "id": "workload:kuma/uptime-kuma",
+      "kind": "workload",
+      "label": "uptime-kuma",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "kuma/deployment.yaml"
+    },
+    {
+      "id": "route:kuma/kuma",
+      "kind": "route",
+      "label": "kuma",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "kuma.lab.example",
+          "kuma.pub.example.com"
+        ]
+      },
+      "source": "kuma/ingressroute.yaml"
+    },
+    {
+      "id": "route:kuma/kuma-secure",
+      "kind": "route",
+      "label": "kuma-secure",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "kuma.lab.example",
+          "kuma.pub.example.com"
+        ]
+      },
+      "source": "kuma/ingressroute.yaml"
+    },
+    {
+      "id": "app:labodeludo",
+      "kind": "app",
+      "label": "labodeludo",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "labodeludo",
+        "path": "labodeludo"
+      },
+      "source": "argocd/apps/labodeludo.yaml"
+    },
+    {
+      "id": "workload:labodeludo/gh-runner",
+      "kind": "workload",
+      "label": "gh-runner",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "labodeludo/gh-runner.yaml"
+    },
+    {
+      "id": "app:logging",
+      "kind": "app",
+      "label": "logging",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "logging",
+        "path": "logging",
+        "s3Refs": [
+          "homelab-backups-example-com",
+          "loki-logs-example-com"
+        ]
+      },
+      "source": "argocd/apps/logging.yaml"
+    },
+    {
+      "id": "workload:logging/alloy",
+      "kind": "workload",
+      "label": "alloy",
+      "layer": "cluster",
+      "meta": {
+        "kind": "DaemonSet"
+      },
+      "source": "logging/alloy.yaml"
+    },
+    {
+      "id": "workload:logging/grafana-backup",
+      "kind": "workload",
+      "label": "grafana-backup",
+      "layer": "cluster",
+      "meta": {
+        "kind": "CronJob"
+      },
+      "source": "logging/grafana-backup-cronjob.yaml"
+    },
+    {
+      "id": "workload:logging/grafana",
+      "kind": "workload",
+      "label": "grafana",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "logging/grafana.yaml"
+    },
+    {
+      "id": "route:logging/grafana",
+      "kind": "route",
+      "label": "grafana",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "grafana.lab.example",
+          "grafana.pub.example.com"
+        ]
+      },
+      "source": "logging/grafana.yaml"
+    },
+    {
+      "id": "route:logging/grafana-secure",
+      "kind": "route",
+      "label": "grafana-secure",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "grafana.lab.example",
+          "grafana.pub.example.com"
+        ]
+      },
+      "source": "logging/grafana.yaml"
+    },
+    {
+      "id": "workload:logging/loki",
+      "kind": "workload",
+      "label": "loki",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "logging/loki.yaml"
+    },
+    {
+      "id": "route:logging/loki",
+      "kind": "route",
+      "label": "loki",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "loki.lab.example"
+        ]
+      },
+      "source": "logging/loki.yaml"
+    },
+    {
+      "id": "app:n8n",
+      "kind": "app",
+      "label": "n8n",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "n8n",
+        "path": "n8n",
+        "s3Refs": [
+          "homelab-backups-example-com"
+        ]
+      },
+      "source": "argocd/apps/n8n.yaml"
+    },
+    {
+      "id": "workload:n8n/n8n-backup",
+      "kind": "workload",
+      "label": "n8n-backup",
+      "layer": "cluster",
+      "meta": {
+        "kind": "CronJob"
+      },
+      "source": "n8n/backup-cronjob.yaml"
+    },
+    {
+      "id": "workload:n8n/n8n",
+      "kind": "workload",
+      "label": "n8n",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "n8n/deployment.yaml"
+    },
+    {
+      "id": "route:n8n/n8n",
+      "kind": "route",
+      "label": "n8n",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "n8n.lab.example",
+          "n8n.pub.example.com"
+        ]
+      },
+      "source": "n8n/ingressroute.yaml"
+    },
+    {
+      "id": "route:n8n/n8n-secure",
+      "kind": "route",
+      "label": "n8n-secure",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "n8n.lab.example",
+          "n8n.pub.example.com"
+        ]
+      },
+      "source": "n8n/ingressroute.yaml"
+    },
+    {
+      "id": "app:ntfy",
+      "kind": "app",
+      "label": "ntfy",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "ntfy",
+        "path": "ntfy",
+        "s3Refs": [
+          "homelab-backups-example-com"
+        ]
+      },
+      "source": "argocd/apps/ntfy.yaml"
+    },
+    {
+      "id": "workload:ntfy/ntfy-backup",
+      "kind": "workload",
+      "label": "ntfy-backup",
+      "layer": "cluster",
+      "meta": {
+        "kind": "CronJob"
+      },
+      "source": "ntfy/backup-cronjob.yaml"
+    },
+    {
+      "id": "workload:ntfy/ntfy",
+      "kind": "workload",
+      "label": "ntfy",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "ntfy/deployment.yaml"
+    },
+    {
+      "id": "route:ntfy/ntfy",
+      "kind": "route",
+      "label": "ntfy",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "ntfy.lab.example",
+          "ntfy.pub.example.com"
+        ]
+      },
+      "source": "ntfy/ingressroute.yaml"
+    },
+    {
+      "id": "route:ntfy/ntfy-secure",
+      "kind": "route",
+      "label": "ntfy-secure",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "ntfy.lab.example",
+          "ntfy.pub.example.com"
+        ]
+      },
+      "source": "ntfy/ingressroute.yaml"
+    },
+    {
+      "id": "app:numeriseur",
+      "kind": "app",
+      "label": "numeriseur",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "numeriseur",
+        "path": "numeriseur",
+        "s3Refs": [
+          "numeriseur-scans-example-com"
+        ]
+      },
+      "source": "argocd/apps/numeriseur.yaml"
+    },
+    {
+      "id": "workload:numeriseur/numeriseur-sftpgo",
+      "kind": "workload",
+      "label": "numeriseur-sftpgo",
+      "layer": "cluster",
+      "meta": {
+        "kind": "Deployment"
+      },
+      "source": "numeriseur/deployment.yaml"
+    },
+    {
+      "id": "app:plex",
+      "kind": "app",
+      "label": "plex",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "plex",
+        "path": "plex"
+      },
+      "source": "argocd/apps/plex.yaml"
+    },
+    {
+      "id": "route:plex/plex",
+      "kind": "route",
+      "label": "plex",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "plex.lab.example",
+          "plex.pub.example.com"
+        ]
+      },
+      "source": "plex/ingressroute.yaml"
+    },
+    {
+      "id": "route:plex/plex-secure",
+      "kind": "route",
+      "label": "plex-secure",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "plex.lab.example",
+          "plex.pub.example.com"
+        ]
+      },
+      "source": "plex/ingressroute.yaml"
+    },
+    {
+      "id": "app:traefik",
+      "kind": "app",
+      "label": "traefik",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "kube-system",
+        "path": "traefik"
+      },
+      "source": "argocd/apps/traefik.yaml"
+    },
+    {
+      "id": "app:unifi",
+      "kind": "app",
+      "label": "unifi",
+      "layer": "cluster",
+      "meta": {
+        "namespace": "unifi",
+        "path": "unifi",
+        "s3Refs": [
+          "homelab-backups-example-com"
+        ]
+      },
+      "source": "argocd/apps/unifi.yaml"
+    },
+    {
+      "id": "workload:unifi/unifi",
+      "kind": "workload",
+      "label": "unifi",
+      "layer": "cluster",
+      "meta": {
+        "hostNetwork": true,
+        "kind": "Deployment"
+      },
+      "source": "unifi/deployment.yaml"
+    },
+    {
+      "id": "route:unifi/unifi",
+      "kind": "route",
+      "label": "unifi",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "unifi.lab.example"
+        ]
+      },
+      "source": "unifi/ingressroute.yaml"
+    },
+    {
+      "id": "route:unifi/unifi-secure",
+      "kind": "route",
+      "label": "unifi-secure",
+      "layer": "cluster",
+      "meta": {
+        "hosts": [
+          "unifi.lab.example"
+        ]
+      },
+      "source": "unifi/ingressroute.yaml"
+    },
+    {
+      "id": "workload:unifi/unifi-mongo-backup",
+      "kind": "workload",
+      "label": "unifi-mongo-backup",
+      "layer": "cluster",
+      "meta": {
+        "hostNetwork": true,
+        "kind": "CronJob"
+      },
+      "source": "unifi/mongo-backup-cronjob.yaml"
+    },
+    {
+      "id": "external:nas",
+      "kind": "external",
+      "label": "nas",
+      "layer": "external",
+      "meta": {
+        "via": "nfs-client PVCs, plex EndpointSlice"
+      },
+      "source": "plex/service.yaml"
+    }
+  ],
+  "repo": "k3s-iac-public",
+  "topologyVersion": 1
+}

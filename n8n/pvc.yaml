@@ -1,0 +1,26 @@
+# local-path bakes a nodeAffinity into the PV pinned to whichever node first
+# provisioned it, so this PVC effectively pins the pod too.
+#
+# 2026-07-24: re-provisioned on gpu-01 (was pi-01) ahead of pi-01's NixOS
+# reimage. Procedure: scale deploy to 0, tar the old dir off pi-01, delete
+# PVC+PV, re-apply this PVC, then a one-shot busybox pod on gpu-01 mounting the
+# new PVC + a hostPath of the tarball to extract it (same one-shot-pod trick
+# used for the unifi vm-02 -> pi-01 move). No nodeSelector is needed on
+# the Deployment - the PV's own nodeAffinity is what keeps the pod on gpu-01.
+#
+# Deliberately NOT switched to nfs-client like unifi's PVCs were: n8n keeps
+# its state in SQLite (database.sqlite + WAL), and SQLite over NFS has known
+# locking/corruption hazards. Cost of that choice is that any future node
+# move needs this same copy dance.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: n8n-data-nfs
+  namespace: n8n
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 2Gi

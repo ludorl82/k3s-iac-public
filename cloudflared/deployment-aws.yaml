@@ -1,0 +1,58 @@
+# Third connector for the "k3s" tunnel, deliberately pinned to the `cloud-01` node.
+#
+# The other two replicas (deployment.yaml) use required anti-affinity for HA,
+# but the scheduler is free to place both on home nodes — and in practice it
+# did (pi-02 + vm-02). That is fine for the home-hosted services, but ntfy
+# and Uptime Kuma exist precisely to alert when the home network is down, and
+# they are pinned to the cloud-01 node for that reason. Without a connector that is
+# also on cloud-01, a home outage would take the tunnel down and the alerting stack
+# would be unreachable exactly when it matters.
+#
+# Anti-affinity cannot express "guarantee one on cloud-01" (it only forbids
+# co-location), so this is a separate single-replica Deployment with an
+# explicit nodeSelector + the controlplane toleration rather than bumping
+# deployment.yaml to replicas: 3.
+#
+# Same tunnel, same TUNNEL_TOKEN Secret — Cloudflare simply sees a third
+# connector and load-balances across whichever ones are healthy. Paired with
+# the ntfy/kuma tunnel ingress rules pointing straight at their in-cluster
+# Services (not at Traefik, which has no cloud-01-resident pod), so the whole
+# edge -> connector -> pod path stays on cloud-01 during a home outage.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared-cloud-01
+  namespace: cloudflared
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloudflared-cloud-01
+  template:
+    metadata:
+      labels:
+        app: cloudflared-cloud-01
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cloud-01
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: controlplane
+          effect: NoSchedule
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          args:
+            - tunnel
+            - --no-autoupdate
+            - run
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom: { secretKeyRef: { name: cloudflared-token, key: TUNNEL_TOKEN } }
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 128Mi

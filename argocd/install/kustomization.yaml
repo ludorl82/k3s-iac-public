@@ -1,0 +1,23 @@
+# Argo CD itself, pinned. `kubectl apply -k argocd/install` for the initial
+# bootstrap; after that Argo manages its own upgrade via the `argocd` app
+# (apps/argocd.yaml) — bump the ref here, merge, sync.
+#
+# cluster-install is the upstream kustomization install.yaml is built from.
+# Non-HA deliberately: one operator, one cluster, and the cluster survives
+# fine if Argo is briefly down — nothing routes through it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: argocd
+
+resources:
+  - namespace.yaml
+  - ingressroute.yaml
+  - https://github.com/argoproj/argo-cd/manifests/cluster-install?ref=v3.5.0
+
+# The upstream install ships an empty argocd-notifications-cm, so our config
+# must MERGE into it, not redeclare it — a duplicate resource id makes the
+# whole kustomization unrenderable (found the hard way).
+patches:
+  - path: notifications-cm.yaml
+  - path: cmd-params-cm.yaml

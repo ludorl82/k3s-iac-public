@@ -1,0 +1,286 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cronicle
+  namespace: cronicle
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cronicle
+  template:
+    metadata:
+      labels:
+        app: cronicle
+    spec:
+      hostname: cronicle
+      serviceAccountName: cronicle-job-trigger
+      containers:
+        - name: cronicle
+          image: soulteary/cronicle:latest
+          env:
+            - name: KUBECONFIG
+              value: /root/.kube/config
+          # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION for the S3
+          # storage engine — the SDK default credential chain picks these up,
+          # so the mounted config.json never holds a credential. Secret is
+          # created out of band (user cronicle-s3 in cloud-01-iac, key in KeePass).
+          envFrom:
+            - secretRef:
+                name: cronicle-s3-credentials
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    apk add --no-cache openssh-client curl
+                    ARCH=$(uname -m)
+                    case "$ARCH" in
+                      x86_64) ARCH=amd64 ;;
+                      aarch64) ARCH=arm64 ;;
+                    esac
+                    KVER=$(curl -sL https://dl.k8s.io/release/stable.txt)
+                    curl -sLo /usr/local/bin/kubectl "https://dl.k8s.io/release/${KVER}/bin/linux/${ARCH}/kubectl"
+                    chmod +x /usr/local/bin/kubectl
+                    mkdir -p /root/.kube
+                    kubectl config set-cluster in-cluster --server=https://kubernetes.default.svc --certificate-authority=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt --embed-certs=true
+                    kubectl config set-credentials cronicle --token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+                    kubectl config set-context in-cluster --cluster=in-cluster --user=cronicle
+                    kubectl config use-context in-cluster
+          ports:
+            - containerPort: 3012
+              name: http
+          # Probes date from the NFS era (a wedged hard mount left the pod
+          # Running-but-dead, seen 2026-07-25). Storage is S3 now, but they
+          # stay: /api/app/ping is served by the same process that talks to
+          # S3, so a dead storage backend still times the probe out.
+          # The postStart hook installs kubectl over the network, so give startup
+          # a wide margin before liveness is allowed to kill anything.
+          startupProbe:
+            httpGet: { path: /api/app/ping, port: 3012 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /api/app/ping, port: 3012 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /api/app/ping, port: 3012 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
+          volumeMounts:
+            # Stateless since 2026-08-07: all durable data is in S3 (see
+            # config-configmap.yaml). logs and queue are local scratch — live
+            # job logs land in logs/jobs/ and are uploaded to storage on
+            # completion, so losing them on pod churn only costs in-flight
+            # runs. No mount at data/ or plugins/ (plugins was always empty).
+            - name: scratch
+              mountPath: /opt/cronicle/logs
+              subPath: logs
+            - name: scratch
+              mountPath: /opt/cronicle/queue
+              subPath: queue
+            - name: cronicle-config
+              mountPath: /opt/cronicle/conf/config.json
+              subPath: config.json
+              readOnly: true
+            - name: console-vm-known-hosts
+              mountPath: /keys/known_hosts
+              subPath: known_hosts
+              readOnly: true
+            - name: ssh-backup
+              mountPath: /keys/backup
+              readOnly: true
+            - name: ssh-weekly-updates
+              mountPath: /keys/weekly-updates
+              readOnly: true
+            - name: ssh-wan-ip-sync
+              mountPath: /keys/wan-ip-sync
+              readOnly: true
+            - name: ssh-backup-pi-01
+              mountPath: /keys/backup-pi-01
+              readOnly: true
+            - name: ssh-backup-cp-1
+              mountPath: /keys/backup-cp-1
+              readOnly: true
+            - name: ssh-backup-vm-03
+              mountPath: /keys/backup-vm-03
+              readOnly: true
+            - name: ssh-backup-console-vm
+              mountPath: /keys/backup-console-vm
+              readOnly: true
+            - name: ssh-backup-pi-02
+              mountPath: /keys/backup-pi-02
+              readOnly: true
+            - name: ssh-keepass-backup
+              mountPath: /keys/keepass-backup
+              readOnly: true
+            - name: ssh-frigate-lowres-sync
+              mountPath: /keys/frigate-lowres-sync
+              readOnly: true
+            - name: ssh-frigate-snapshot-sync
+              mountPath: /keys/frigate-snapshot-sync
+              readOnly: true
+            - name: ssh-frigate-lowres-feed-watchdog
+              mountPath: /keys/frigate-lowres-feed-watchdog
+              readOnly: true
+            - name: ssh-frigate-lowres-prune
+              mountPath: /keys/frigate-lowres-prune
+              readOnly: true
+            - name: ssh-frigate-nas-backup
+              mountPath: /keys/frigate-nas-backup
+              readOnly: true
+            - name: ssh-frigate-recording-watchdog
+              mountPath: /keys/frigate-recording-watchdog
+              readOnly: true
+            - name: ssh-backup-cloud-01
+              mountPath: /keys/backup-cloud-01
+              readOnly: true
+            - name: ssh-nixos-drift
+              mountPath: /keys/nixos-drift
+              readOnly: true
+            - name: ssh-iac-updates
+              mountPath: /keys/iac-updates
+              readOnly: true
+            - name: ssh-diagram-sync
+              mountPath: /keys/diagram-sync
+              readOnly: true
+            # The morning chain's three jobs (2026-08-09): Cronicle is now the
+            # only scheduler for the diagram pipeline. drift-dispatch and
+            # arch-refresh only trigger GitHub workflows and wait for them;
+            # snapshot-publish is the manual, no-timing event that crosses
+            # the private->public boundary.
+            - name: ssh-drift-dispatch
+              mountPath: /keys/drift-dispatch
+              readOnly: true
+            - name: ssh-arch-refresh
+              mountPath: /keys/arch-refresh
+              readOnly: true
+            - name: ssh-snapshot-publish
+              mountPath: /keys/snapshot-publish
+              readOnly: true
+            - name: ssh-ha-backup
+              mountPath: /keys/ha-backup
+              readOnly: true
+      volumes:
+        - name: scratch
+          emptyDir: {}
+        - name: cronicle-config
+          configMap:
+            name: cronicle-config
+        - name: console-vm-known-hosts
+          configMap:
+            name: console-vm-known-hosts
+        - name: ssh-backup
+          secret:
+            secretName: cronicle-ssh-backup
+            defaultMode: 0400
+        - name: ssh-weekly-updates
+          secret:
+            secretName: cronicle-ssh-weekly-updates
+            defaultMode: 0400
+        - name: ssh-wan-ip-sync
+          secret:
+            secretName: cronicle-ssh-wan-ip-sync
+            defaultMode: 0400
+        - name: ssh-backup-pi-01
+          secret:
+            secretName: cronicle-ssh-backup-pi-01
+            defaultMode: 0400
+        - name: ssh-backup-cp-1
+          secret:
+            secretName: cronicle-ssh-backup-cp-1
+            defaultMode: 0400
+        - name: ssh-backup-vm-03
+          secret:
+            secretName: cronicle-ssh-backup-vm-03
+            defaultMode: 0400
+        - name: ssh-backup-console-vm
+          secret:
+            secretName: cronicle-ssh-backup-console-vm
+            defaultMode: 0400
+        - name: ssh-backup-pi-02
+          secret:
+            secretName: cronicle-ssh-backup-pi-02
+            defaultMode: 0400
+        - name: ssh-keepass-backup
+          secret:
+            secretName: cronicle-ssh-keepass-backup
+            defaultMode: 0400
+        - name: ssh-frigate-lowres-sync
+          secret:
+            secretName: cronicle-ssh-frigate-lowres-sync
+            defaultMode: 0400
+        - name: ssh-frigate-snapshot-sync
+          secret:
+            secretName: cronicle-ssh-frigate-snapshot-sync
+            defaultMode: 0400
+        - name: ssh-frigate-lowres-feed-watchdog
+          secret:
+            secretName: cronicle-ssh-frigate-lowres-feed-watchdog
+            defaultMode: 0400
+        - name: ssh-frigate-lowres-prune
+          secret:
+            secretName: cronicle-ssh-frigate-lowres-prune
+            defaultMode: 0400
+        - name: ssh-frigate-nas-backup
+          secret:
+            secretName: cronicle-ssh-frigate-nas-backup
+            defaultMode: 0400
+        - name: ssh-frigate-recording-watchdog
+          secret:
+            secretName: cronicle-ssh-frigate-recording-watchdog
+            defaultMode: 0400
+        - name: ssh-backup-cloud-01
+          secret:
+            secretName: cronicle-ssh-backup-cloud-01
+            defaultMode: 0400
+        - name: ssh-nixos-drift
+          secret:
+            secretName: cronicle-ssh-nixos-drift
+            defaultMode: 0400
+        - name: ssh-iac-updates
+          secret:
+            secretName: cronicle-ssh-iac-updates
+            defaultMode: 0400
+        - name: ssh-diagram-sync
+          secret:
+            secretName: cronicle-ssh-diagram-sync
+            defaultMode: 0400
+        - name: ssh-drift-dispatch
+          secret:
+            secretName: cronicle-ssh-drift-dispatch
+            defaultMode: 0400
+        - name: ssh-arch-refresh
+          secret:
+            secretName: cronicle-ssh-arch-refresh
+            defaultMode: 0400
+        - name: ssh-snapshot-publish
+          secret:
+            secretName: cronicle-ssh-snapshot-publish
+            defaultMode: 0400
+        - name: ssh-ha-backup
+          secret:
+            secretName: cronicle-ssh-ha-backup
+            defaultMode: 0400
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cronicle
+  namespace: cronicle
+spec:
+  type: ClusterIP
+  selector:
+    app: cronicle
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3012

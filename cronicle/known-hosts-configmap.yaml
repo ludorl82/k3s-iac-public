@@ -1,0 +1,35 @@
+# Pinned host keys for every SSH target Cronicle reaches (mounted at
+# /keys/known_hosts by deployment.yaml). Name is historical -- it predates
+# the jumphost split and holds the whole fleet, not just console-vm.
+#
+# jumphost.lab.example = pi-02's keys (the jumphost alias, 2026-08-07 split).
+# console-vm.lab.example currently ALSO = pi-02; it repoints to the console VM
+# at cutover, at which point its key lines here change to the VM's.
+# The dead Pi-4 key and the 192.0.2.33 leftovers (reverted bc016ca) were
+# dropped when this object moved into git.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: console-vm-known-hosts
+  namespace: cronicle
+data:
+  known_hosts: |
+    cloud-01.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    gpu-02.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    pi-01.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    pi-02.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    vm-01.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    vm-02.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    vm-03.lab.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    console-vm.lab.example,console-vm ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    console-vm.lab.example,console-vm ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    # The CONSOLE CONTAINER on the console-vm VM, sshd on 2222 — a different
+    # host key from the VM's own port-22 entry above, and known_hosts keys
+    # a non-default port as [host]:port, so the entry above never matched
+    # it. Added 2026-08-09 with the three morning-chain keys: without it
+    # StrictHostKeyChecking=yes cannot work, and the events that dial 2222
+    # had been falling back to accept-new against a scratch file — trust on
+    # first use, every run, which is not what this ConfigMap promises.
+    [console-vm.lab.example]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    jumphost.lab.example,jumphost ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example
+    jumphost.lab.example,jumphost ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMYDUMMY0000 reader@example

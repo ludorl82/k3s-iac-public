@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keepass-webdav
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:ludorl82/k3s-iac.git
+    targetRevision: main
+    path: keepass-webdav
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keepass-webdav
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - RespectIgnoreDifferences=true
+  # replicas is operator state (maintenance scale-to-zero is intent, not
+  # drift) — never part of the diff, never reverted by a sync.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

@@ -1,0 +1,63 @@
+# unifi.lab.example previously routed via cloud-01 Docker Traefik -> https://192.0.2.134:8443
+# (insecureSkipVerify, UniFi's self-signed cert). This IngressRoute moves that
+# hop in-cluster so the name can point straight at cloud-01's k3s ingress (svclb)
+# instead.
+#
+# The `unifi` Service lives in service.yaml, NOT here. It used to be duplicated
+# in this file as a ClusterIP exposing only 8443, which silently conflicted with
+# the LoadBalancer definition in service.yaml. `kubectl apply -f unifi/` only
+# survived that by luck of alphabetical ordering (service.yaml applies last and
+# won); applying this file on its own would have reverted the Service and
+# dropped the 8080 device-inform port, stranding the AP. Removed 2026-07-24.
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: unifi-insecure
+  namespace: unifi
+spec:
+  insecureSkipVerify: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: unifi
+spec:
+  redirectScheme:
+    permanent: true
+    scheme: https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: unifi
+  namespace: unifi
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`unifi.lab.example`)
+      middlewares:
+        - name: redirect-to-https
+      services:
+        - name: unifi
+          port: 8443
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: unifi-secure
+  namespace: unifi
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`unifi.lab.example`)
+      services:
+        - name: unifi
+          port: 8443
+          scheme: https
+          serversTransport: unifi-insecure
+  tls: {}

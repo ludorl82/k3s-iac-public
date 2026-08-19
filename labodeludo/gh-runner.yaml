@@ -1,0 +1,93 @@
+# The self-hosted GitHub Actions runner for ludorl82/labodeludo.dev.
+#
+# Declared here 2026-08-07. It had been live-only since 2026-07-17 — created
+# imperatively and never committed, so the Argo app in this directory managed
+# the staging site beside it while the runner that deployed that site was
+# invisible to git. The staging site is gone (see the deletion note in
+# README.md); the runner outlived it and is now the only workload in the
+# namespace, which made leaving it undeclared the more obvious gap.
+#
+# It serves `deploy-prod` only: build the Astro site, `cloud-01 s3 sync` it to the
+# prod bucket, run the redirect script. `deploy-staging` used to run here too
+# and now runs on a GitHub-hosted runner, since publishing to Cloudflare Pages
+# needs nothing from this cluster.
+#
+# NO RBAC, deliberately. There was a `runner-sa` ServiceAccount bound to a
+# `runner-role` granting get/list/watch/patch/update/create on deployments,
+# pods, pods/exec and pods/log — the rights `deploy-staging` needed to
+# `kubectl exec` and `kubectl cp` a build into the nginx pod. Nothing uses
+# them now: prod talks to S3 and never to the API server. They were deleted
+# rather than carried forward, so the pod runs as the namespace `default`
+# ServiceAccount with no cluster rights at all. If a future job here does need
+# the API, add a Role scoped to what that job actually touches — do not
+# restore this one.
+#
+# ACCESS_TOKEN comes from the `gh-runner-token` Secret, created imperatively
+# (a GitHub PAT) and never in git — same convention as `cloudflared-token`.
+# A rebuild of this namespace needs that Secret recreated by hand first.
+#
+# `image: :latest` is inherited from the original imperative manifest and kept
+# as-is: this was a fold-in, not a redesign. It means a restart can silently
+# change the runner version, which is worth pinning at some point.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gh-runner
+  namespace: labodeludo
+spec:
+  replicas: 1
+  # Recreate, not the default RollingUpdate. RUNNER_NAME is a fixed string, so
+  # a surge pod registers the name the old pod already holds; GitHub hands the
+  # registration to the newcomer and the survivor logs "The runner no longer
+  # exists on the server", wipes its config and exits 0. It does come back on
+  # the next restart, so the symptom is a self-healing RESTARTS count rather
+  # than an outage — which is exactly why it would go unnoticed. Observed on
+  # the 2026-08-07 rollout. Tearing down before starting up costs a few
+  # seconds of runner availability and makes the collision impossible.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gh-runner
+  template:
+    metadata:
+      labels:
+        app: gh-runner
+    spec:
+      # Spelled out rather than omitted. Dropping the `serviceAccountName` line
+      # entirely left the live `runner-sa` in place — `kubectl diff` reported no
+      # change at all — because removing a field is only a removal if the
+      # applier decides it is. Naming `default` makes the demotion explicit to
+      # Argo and to anyone reading this.
+      serviceAccountName: default
+      containers:
+        - name: runner
+          image: myoung34/github-runner:latest
+          env:
+            - name: REPO_URL
+              value: https://github.com/ludorl82/labodeludo.dev
+            - name: RUNNER_NAME
+              value: k3s-runner
+            - name: RUNNER_SCOPE
+              value: repo
+            # The workflow selects this runner with `runs-on: [self-hosted, k3s]`.
+            - name: LABELS
+              value: k3s
+            # emptyDir-less: /tmp is the container filesystem, so a restart
+            # discards the work tree. That is intended — each job checks out
+            # fresh, and there is no shared state to race over.
+            - name: RUNNER_WORKDIR
+              value: /tmp/runner-work
+            - name: DISABLE_AUTO_UPDATE
+              value: "true"
+            - name: ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gh-runner-token
+                  key: token
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
