@@ -1,0 +1,8 @@
+{
+  "_comment": "Argo CD app -> Kuma monitor ids that judge it, read off the public 'gate' status page (http://uptime-kuma.kuma.svc/api/status-page/heartbeat/gate). Only fast HTTP/JSON monitors belong here: a push monitor that beats once an hour cannot say anything about a commit 15 minutes old. Apps absent from this map are judged on Argo CD health alone. Add a monitor to the 'gate' status page in Kuma when you add it here, or the gate never sees it.",
+  "frigate": [9, 10],
+  "logging": [18, 19],
+  "traefik": [9, 18, 19],
+  "labodeludo": [66],
+  "cloudflared": [8]
+}

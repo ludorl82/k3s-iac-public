@@ -1,0 +1,77 @@
+# The post-merge gate for Renovate commits -- see gate.py for what it judges
+# and why it exists. Every 10 minutes, one short-lived pod: clone main, look
+# at the Renovate commits of the last 6 hours, revert the ones that went red.
+#
+# Secrets in this namespace, created out-of-band (secrets doctrine):
+#   iac-gate-deploy-key  key id_ed25519  -- GitHub deploy key on k3s-iac with
+#                                           WRITE access (title "iac-gate"),
+#                                           the only writer besides Renovate
+#   iac-gate-ntfy        key token       -- ntfy user `iac-gate`, write-only
+#                                           to topic `alerts`
+#   iac-gate-kuma        key push-url    -- Kuma push monitor "iac-gate"
+#                                           (30 min interval; fires on absence)
+#
+# The image is stock alpine with the tools installed at start, like
+# access-audit/ does: no image to build, and a failed apk is a loud failure
+# the Kuma push monitor reports as absence.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: iac-gate
+  namespace: iac-gate
+spec:
+  schedule: "*/10 * * * *"
+  # Declared so a sync re-arms a gate that was suspended by hand: a field the
+  # manifest never mentions is not drift to Argo CD (2026-09-16, suspended
+  # during Frigate's pull and not unsuspended by the next merge).
+  suspend: false
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 540
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: iac-gate
+          restartPolicy: Never
+          containers:
+            - name: gate
+              image: alpine:3.24
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  apk add --no-cache git openssh-client python3 py3-yaml > /dev/null
+                  exec python3 /etc/iac-gate/gate.py
+              env:
+                - name: GIT_SSH_COMMAND
+                  value: ssh -i /keys/id_ed25519 -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/iac-gate/known_hosts -o StrictHostKeyChecking=yes
+                - name: NTFY_TOKEN
+                  valueFrom: { secretKeyRef: { name: iac-gate-ntfy, key: token } }
+                - name: KUMA_PUSH_URL
+                  valueFrom: { secretKeyRef: { name: iac-gate-kuma, key: push-url } }
+              volumeMounts:
+                - name: scripts
+                  mountPath: /etc/iac-gate
+                  readOnly: true
+                - name: deploy-key
+                  mountPath: /keys
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 512Mi }
+          volumes:
+            - name: scripts
+              configMap:
+                name: iac-gate-scripts
+            - name: deploy-key
+              secret:
+                secretName: iac-gate-deploy-key
+                defaultMode: 0400
+            - name: work
+              emptyDir: {}

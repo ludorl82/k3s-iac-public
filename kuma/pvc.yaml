@@ -1,0 +1,18 @@
+# local-path, not nfs-client: Kuma's whole state is kuma.db (SQLite + WAL),
+# and SQLite over NFS has known locking/corruption hazards — same reasoning
+# that keeps n8n on local-path. local-path bakes a nodeAffinity into the PV
+# pinned to whichever node first provisioned it; here that is deliberately
+# `cloud-01` (see the Deployment's nodeSelector), so the monitor does not share
+# fate with the home network it is monitoring.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kuma-data
+  namespace: kuma
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi

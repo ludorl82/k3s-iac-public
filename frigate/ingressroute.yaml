@@ -1,0 +1,61 @@
+# In-cluster access path: frigate.lab.example points at cp-1 (same pattern as
+# netbox/cronicle) and the pub.example.com twin arrives via the cloud-01 tunnel ->
+# cloud-01 Traefik -> https://cp-1 hop (see cloud-01 frigate.yml, "k3s-hosted"
+# variant of the Tunnel+Access pattern). The Service resolves to the
+# hostNetwork pod's endpoint (gpu-02:5000); gpu-02's firewalld must
+# keep 5000/tcp open for this hop to work.
+apiVersion: v1
+kind: Service
+metadata:
+  name: frigate
+  namespace: frigate
+spec:
+  selector:
+    app: frigate
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: frigate
+spec:
+  redirectScheme:
+    permanent: true
+    scheme: https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: frigate
+  namespace: frigate
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`frigate.lab.example`) || Host(`frigate.pub.example.com`)
+      middlewares:
+        - name: redirect-to-https
+      services:
+        - name: frigate
+          port: 5000
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: frigate-secure
+  namespace: frigate
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`frigate.lab.example`) || Host(`frigate.pub.example.com`)
+      services:
+        - name: frigate
+          port: 5000
+  tls: {}

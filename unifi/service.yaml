@@ -1,0 +1,27 @@
+# Added to this repo 2026-07-24 (existed live before, out-of-band, like
+# mongo-backup-cronjob.yaml originally did). Changed from ClusterIP
+# (8443 only) to LoadBalancer with both 8443 (web UI/API, already reached
+# via cloud-01 Traefik -> this Service) and 8080 (device inform) - the inform
+# port previously had no Service in front of it at all, so an AP's cached
+# inform URL had to point at whatever node's raw IP happened to be
+# running the pod, breaking on every node move (this bit us moving the
+# pod from vm-02 to pi-01). With LoadBalancer, k3s's svclb DaemonSet
+# listens on 8080 on every node and forwards to wherever the pod actually
+# is, so an AP can point at ANY node's IP and keep working regardless of
+# future moves.
+apiVersion: v1
+kind: Service
+metadata:
+  name: unifi
+  namespace: unifi
+spec:
+  type: LoadBalancer
+  selector:
+    app: unifi
+  ports:
+    - name: https
+      port: 8443
+      targetPort: 8443
+    - name: inform
+      port: 8080
+      targetPort: 8080

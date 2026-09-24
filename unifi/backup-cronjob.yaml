@@ -1,0 +1,60 @@
+# Requires two Secrets in this namespace, created out-of-band (contain AWS creds /
+# the backup passphrase - not managed via this repo): homelab-backup-s3-credentials
+# (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION for the shared docker-homelab-backup
+# IAM user) and homelab-backup-passphrase (single "passphrase" key, from KeePass
+# "Homelab Backup Passphrase"). Also requires unifi-credentials (MONGO_INITDB_ROOT_USERNAME/
+# MONGO_INITDB_ROOT_PASSWORD) already used by the unifi Deployment itself.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: unifi-mongo-backup
+  namespace: unifi
+spec:
+  schedule: "30 2 * * *"
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: mongo:8.3
+              command:
+                - bash
+                - -c
+                - |
+                  set -euo pipefail
+                  apt-get update -qq && apt-get install -y -qq gnupg awscli > /dev/null
+                  DATE=$(date +%Y-%m-%d)
+                  mongodump --host=127.0.0.1 --port=27017 -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase=admin --db=unifi --archive \
+                    | gpg --batch --yes --passphrase-file "$GPG_PASSPHRASE_FILE" -c -o /tmp/unifi-mongo.archive.gpg
+                  cloud-01 s3 cp /tmp/unifi-mongo.archive.gpg "s3://homelab-backups-example-com/unifi-mongo/${DATE}.archive.gpg"
+                  rm -f /tmp/unifi-mongo.archive.gpg
+              env:
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_ACCESS_KEY_ID } }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_SECRET_ACCESS_KEY } }
+                - name: AWS_REGION
+                  valueFrom: { secretKeyRef: { name: homelab-backup-s3-credentials, key: AWS_REGION } }
+                - name: MONGO_INITDB_ROOT_USERNAME
+                  valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_INITDB_ROOT_USERNAME } }
+                - name: MONGO_INITDB_ROOT_PASSWORD
+                  valueFrom: { secretKeyRef: { name: unifi-credentials, key: MONGO_INITDB_ROOT_PASSWORD } }
+                - name: GPG_PASSPHRASE_FILE
+                  value: /etc/backup-passphrase/passphrase
+              volumeMounts:
+                - name: backup-passphrase
+                  mountPath: /etc/backup-passphrase
+                  readOnly: true
+          # Must land on the same node as the unifi pod - mongo is only
+          # bound to 127.0.0.1 inside that pod's network namespace
+          # (hostNetwork), not reachable from elsewhere in the cluster.
+          hostNetwork: true
+          nodeSelector:
+            kubernetes.io/hostname: vm-02
+          volumes:
+            - name: backup-passphrase
+              secret:
+                secretName: homelab-backup-passphrase

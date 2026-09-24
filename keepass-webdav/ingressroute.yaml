@@ -1,0 +1,39 @@
+# vault.family.example — public only, no lab.example twin. KeePass mobile clients hit this
+# from off-LAN; on-LAN they reach the .kdbx by other means.
+#
+# The basic-auth credential (user `keepass2`, bcrypt cost 10) is NOT in this repo.
+# It lives in the `webdav-auth` Secret, created out-of-band like every other
+# secret here, and in the KeePass entry "Keepass Server":
+#
+#   kubectl -n keepass-webdav create secret generic webdav-auth \
+#     --from-literal=users="keepass2:$(ssh pi-02 kp-get 'Keepass Server' | htpasswd-bcrypt)"
+#
+# Rate limiting is deliberately absent here: it moved to a Cloudflare edge rule
+# (20 req/10s) when the Traefik `webdav-ratelimit` middleware was retired. Do not
+# re-add a Traefik-level limiter without checking that the edge rule is gone.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: webdav-auth
+  namespace: keepass-webdav
+spec:
+  basicAuth:
+    secret: webdav-auth
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: webdav-secure
+  namespace: keepass-webdav
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`vault.family.example`)
+      middlewares:
+        - name: webdav-auth
+      services:
+        - name: webdav
+          port: 8080
+  tls: {}

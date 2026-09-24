@@ -1,0 +1,89 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Self-hosted Renovate, run daily from console-vm (scripts/renovate-run.sh, Cronicle-triggered). Every image bump is opened as its own PR and AUTOMERGED by Renovate itself after a per-tier release age -- nobody clicks merge (decision of 2026-09-16). Merge = deploy via Argo CD; the iac-gate CronJob (iac-gate/) watches every Renovate commit for 15 minutes after it lands and reverts it on a red app or a red Kuma monitor, then appends an auto-block rule here so the same version is not re-proposed for 30 days. renovate-run.sh prunes expired auto-blocks before each run. This repo has no status checks, hence ignoreTests: the gate after the merge is the test.",
+  "enabledManagers": [
+    "kubernetes",
+    "kustomize"
+  ],
+  "kubernetes": {
+    "managerFilePatterns": [
+      "/\\.yaml$/"
+    ]
+  },
+  "prConcurrentLimit": 10,
+  "prHourlyLimit": 0,
+  "labels": [
+    "renovate"
+  ],
+  "dependencyDashboard": true,
+  "rangeStrategy": "pin",
+  "separateMinorPatch": true,
+  "separateMultipleMajor": true,
+  "rebaseWhen": "behind-base-branch",
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "platformAutomerge": false,
+  "ignoreTests": true,
+  "packageRules": [
+    {
+      "description": "Digest, pin and patch bumps merge as soon as Renovate sees them again (next daily run). The gate is the test.",
+      "matchUpdateTypes": [
+        "digest",
+        "pin",
+        "pinDigest",
+        "patch"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "Minors wait 3 days upstream, then merge. One PR per image so a revert targets one image.",
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "minimumReleaseAge": "3 days",
+      "automerge": true
+    },
+    {
+      "description": "Majors wait 14 days upstream, then merge. A major that breaks is caught by the gate and blocked for 30 days; the Dependency Dashboard approval that used to hold them was the one manual step left (lesson of 2026-07-31, retired 2026-09-16).",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "minimumReleaseAge": "14 days",
+      "automerge": true
+    },
+    {
+      "description": "Fragile list: images whose minors have carried config/schema changes (Frigate, Loki, Argo CD, the UniFi mongo). Minors wait 14 days, majors 30 -- the community finds the regressions first. Still automerged; the gate still reverts.",
+      "matchPackageNames": [
+        "ghcr.io/blakeblackshear/frigate",
+        "grafana/loki",
+        "argoproj/argo-cd",
+        "mongo"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "minimumReleaseAge": "14 days"
+    },
+    {
+      "matchPackageNames": [
+        "ghcr.io/blakeblackshear/frigate",
+        "grafana/loki",
+        "argoproj/argo-cd"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "minimumReleaseAge": "30 days"
+    },
+    {
+      "description": "Database majors never come from a bot: mongo upgrades are one-major-at-a-time maintenances with an FCV runbook (see history.md 2026-07-31)",
+      "matchPackageNames": [
+        "mongo"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    }
+  ]
+}

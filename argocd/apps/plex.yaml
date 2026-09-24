@@ -1,0 +1,23 @@
+# Routing only — Plex itself runs on the QNAP, outside the cluster. This app
+# manages the Service/EndpointSlice/IngressRoute that make plex.lab.example and
+# plex.pub.example.com resolvable through in-cluster Traefik.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: plex
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:ludorl82/k3s-iac.git
+    targetRevision: main
+    path: plex
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: plex
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - RespectIgnoreDifferences=true

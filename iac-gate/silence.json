@@ -1,0 +1,13 @@
+{
+  "_comment": "Argo CD app -> Kuma monitors to put under maintenance while Renovate merges a bump for it, and for how many minutes. Read by scripts/renovate-run.sh (via scripts/kuma-silence.py) BEFORE it merges, so a rollout that takes the service down for a few minutes does not page anyone at 06:00 (Frigate 0.18.0 on 2026-09-16: two DOWN pages during a 10 GB image pull). Wider than iac-gate/apps.json on purpose: apps.json lists the fast monitors the gate JUDGES with; this lists everything that would PAGE, including the push monitors of host-side jobs that talk to the service. The gate ignores a monitor under maintenance (beat status 3) and judges on Argo health meanwhile; when the window ends Kuma pages for real if the service is still down, and the gate reverts. Apps absent here are not silenced.",
+  "_default_minutes": 45,
+  "frigate": { "monitors": [9, 10, 11, 14, 15, 16, 17], "minutes": 90 },
+  "logging": { "monitors": [18, 19, 33], "minutes": 45 },
+  "labodeludo": { "monitors": [66], "minutes": 30 },
+  "cloudflared": { "monitors": [8, 66], "minutes": 30 },
+  "traefik": { "monitors": [8, 9, 18, 19, 66], "minutes": 30 },
+  "ntfy": { "monitors": [31], "minutes": 30 },
+  "kuma": { "monitors": [30], "minutes": 30 },
+  "n8n": { "monitors": [34], "minutes": 30 },
+  "unifi": { "monitors": [36], "minutes": 45 }
+}

@@ -1,0 +1,26 @@
+# App-of-apps: the one Application applied by hand (once), from which every
+# other Application flows. It watches argocd/apps/ — adding an app to the
+# cluster becomes "add a file there, merge".
+#
+# Automated WITHOUT selfHeal and WITHOUT prune, here and (eventually) in every
+# child app. That combination means: sync when git changes, show drift
+# passively otherwise, never delete anything, never fight an operator. The
+# eleven scaled-to-zero workloads of 2026-07-26 are the standing reason.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:ludorl82/k3s-iac.git
+    targetRevision: main
+    path: argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false

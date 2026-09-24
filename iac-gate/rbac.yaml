@@ -1,0 +1,37 @@
+# The gate reads Argo CD Applications through the Kubernetes API with its own
+# ServiceAccount -- no Argo CD account, no argocd CLI, nothing to rotate. It
+# only ever reads; the write it does is a git push, with the deploy key.
+#
+# Cluster-scoped on purpose. The first version was a Role in the argocd
+# namespace, but kustomization.yaml sets `namespace: iac-gate` and the
+# namespace transformer rewrote the Role and RoleBinding into iac-gate, where
+# they grant nothing useful: the first run that actually read an Application
+# (2026-09-16 19:30) got 403. A ClusterRole is not rewritten, and reading
+# Applications everywhere is still just reading.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: iac-gate
+  namespace: iac-gate
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: iac-gate-read-applications
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: iac-gate-read-applications
+subjects:
+  - kind: ServiceAccount
+    name: iac-gate
+    namespace: iac-gate
+roleRef:
+  kind: ClusterRole
+  name: iac-gate-read-applications
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,35 @@
+# Plex runs on the QNAP (nas, 192.0.2.65:32400) — outside the cluster and
+# staying there. This is a selector-less Service + hand-written EndpointSlice so
+# in-cluster Traefik can route to it like any other backend.
+#
+# Added 2026-08-06 when cloud-01's Docker Traefik was retired: it was the only thing
+# serving plex.lab.example, so the LAN name needed an in-cluster home.
+#
+# NOTE: no selector means nothing maintains this endpoint. If the QNAP's IP ever
+# changes, this file is the single place to fix — nothing will self-heal.
+apiVersion: v1
+kind: Service
+metadata:
+  name: plex
+  namespace: plex
+spec:
+  ports:
+    - name: http
+      port: 32400
+      targetPort: 32400
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: plex
+  namespace: plex
+  labels:
+    kubernetes.io/service-name: plex
+addressType: IPv4
+ports:
+  - name: http
+    port: 32400
+    protocol: TCP
+endpoints:
+  - addresses:
+      - 192.0.2.65

@@ -1,0 +1,42 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: kuma
+spec:
+  redirectScheme:
+    permanent: true
+    scheme: https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: kuma
+  namespace: kuma
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`kuma.lab.example`) || Host(`kuma.pub.example.com`)
+      middlewares:
+        - name: redirect-to-https
+      services:
+        - name: uptime-kuma
+          port: 80
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: kuma-secure
+  namespace: kuma
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`kuma.lab.example`) || Host(`kuma.pub.example.com`)
+      services:
+        - name: uptime-kuma
+          port: 80
+  tls: {}

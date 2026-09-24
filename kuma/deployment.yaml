@@ -1,0 +1,113 @@
+# Uptime Kuma — the lab's monitoring/alerting dashboard. Migrated from Docker
+# on cloud-01 (~/uptime-kuma-docker) into k3s on 2026-07-25, but deliberately pinned
+# back onto the `cloud-01` node via nodeSelector + the controlplane toleration: the
+# original design put Kuma on the cloud box specifically so a home network or
+# VLAN10 outage would not take down the thing meant to alert about it. Letting
+# the scheduler move it onto a home node would silently undo that.
+#
+# NODE_EXTRA_CA_CERTS is what lets Kuma's HTTP monitors validate the private
+# CA (pki.example.com) instead of resorting to ignoreTls — the cert comes
+# from the private-ca ConfigMap in this directory.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: uptime-kuma
+  namespace: kuma
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: uptime-kuma
+  template:
+    metadata:
+      labels:
+        app: uptime-kuma
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cloud-01
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: controlplane
+          effect: NoSchedule
+      containers:
+        - name: uptime-kuma
+          image: louislam/uptime-kuma:2
+          ports:
+            - containerPort: 3001
+              name: http
+              # Compatibility endpoint: every fleet pusher (cloud-01/console-vm
+              # backup scripts, router, gpu-02, QNAP) targets
+              # http://198.51.100.7:3001/api/push/<token> from the docker-on-cloud-01
+              # era. The pod is pinned to cloud-01 (above), so a hostPort re-opens
+              # that exact address - no script edits, incl. hosts that don't
+              # trust the private CA (QNAP, pfSense). ServiceLB can't do this:
+              # svclb daemonsets don't tolerate the custom dedicated=
+              # controlplane taint.
+              hostPort: 3001
+          env:
+            - name: NODE_EXTRA_CA_CERTS
+              value: /certs/pki-example-root.crt
+            - name: UPTIME_KUMA_PORT
+              value: "3001"
+          # /api/entry-page rather than /, which only 302s to /dashboard and
+          # would pass without the app being functional.
+          # This PVC is local-path on the cloud-01 node (EBS), not NFS, so this is
+          # hygiene rather than NAS-outage cover — but kuma is what reports
+          # everything else being down, so it is the worst one to leave
+          # silently wedged.
+          # 60 minutes of startup grace, not five: kuma runs DB migrations on
+          # version bumps ("[DON'T STOP]" in its own logs), and the v2 aggregate
+          # migration ran ~40 min — the old 5-min window killed it mid-flight,
+          # leaving an interrupted-migration flag that blocked every later boot
+          # (2026-07-31, see history.md).
+          startupProbe:
+            httpGet: { path: /api/entry-page, port: 3001 }
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 120
+          livenessProbe:
+            httpGet: { path: /api/entry-page, port: 3001 }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /api/entry-page, port: 3001 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: private-ca
+              mountPath: /certs
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 192Mi
+            limits:
+              memory: 768Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: kuma-data
+        - name: private-ca
+          configMap:
+            name: private-ca
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: uptime-kuma
+  namespace: kuma
+spec:
+  type: ClusterIP
+  selector:
+    app: uptime-kuma
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3001

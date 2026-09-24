@@ -1,0 +1,29 @@
+# The certificate Traefik serves by default: every *-secure IngressRoute in the
+# cluster uses this store and none names a TLS secret of its own (checked
+# 2026-09-23 across all nine), so this one object decides what every
+# *.lab.example service presents.
+#
+# It points at the Let's Encrypt secret cert-manager maintains. Until
+# 2026-09-23 it pointed at wildcard-lab-example, a ten-year certificate from the
+# private CA that macOS rejects (over 825 days). That old secret is KEPT:
+# rolling back is putting its name back here.
+#
+# This object used to exist only in the cluster, created by hand. Declaring it
+# makes the switch a reviewable diff and the rollback a revert.
+#
+# Checked BEFORE switching, against the chain cert-manager stores
+# (*.lab.example <- YR1 <- ISRG Root YR <- cross-signed by ISRG Root X1):
+#   macOS            security verify-cert -p ssl   successful, CT verified
+#   console          openssl verify                OK
+#   NixOS (pi-02)  openssl verify, its bundle    OK, ISRG Root X1 present
+#   Kuma (Node)      145 roots, ISRG Root X1 present; NODE_EXTRA_CA_CERTS only
+#                    ADDS the private root, it does not replace the defaults
+# Nothing in these repos pins the private root alone.
+apiVersion: traefik.io/v1alpha1
+kind: TLSStore
+metadata:
+  name: default
+  namespace: kube-system
+spec:
+  defaultCertificate:
+    secretName: wildcard-lab-example-le

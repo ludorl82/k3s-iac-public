@@ -1,0 +1,99 @@
+# httpd.conf for the WebDAV endpoint, copied verbatim from the retired
+# cloud-01:~/web-docker/webdav/httpd.conf (2026-08-06 tunnel consolidation).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: httpd-conf
+  namespace: keepass-webdav
+data:
+  httpd.conf: |
+    ServerRoot "/usr/local/apache2"
+    Listen 8080
+    ServerName vault.family.example
+    PidFile /tmp/httpd.pid
+
+    LoadModule mpm_event_module modules/mod_mpm_event.so
+    LoadModule unixd_module modules/mod_unixd.so
+    LoadModule authz_core_module modules/mod_authz_core.so
+    LoadModule log_config_module modules/mod_log_config.so
+    LoadModule headers_module modules/mod_headers.so
+    LoadModule dav_module modules/mod_dav.so
+    LoadModule dav_fs_module modules/mod_dav_fs.so
+    LoadModule dav_lock_module modules/mod_dav_lock.so
+
+    ErrorLog /proc/self/fd/2
+    LogLevel warn
+    LogFormat "%h %t \"%r\" %>s %b" common
+    CustomLog /proc/self/fd/1 common
+
+    # WebDAV MOVE/COPY fix for running behind a TLS-terminating reverse proxy:
+    # clients send Destination: https://vault.family.example/... but Apache serves http on :8080,
+    # and mod_dav returns 502 on the scheme/port mismatch. Rewrite Destination to the backend.
+    RequestHeader edit Destination ^https://([^/]+)/ http://$1:8080/
+
+    DavLockDB /tmp/DavLock
+
+    DocumentRoot "/data"
+
+    # Default: deny everything (protects any other files in the dir).
+    # Allow OPTIONS so WebDAV clients can probe capabilities without listing files.
+    <Directory "/data">
+        Dav On
+        Options None
+        AllowOverride None
+        Require all denied
+        <Limit OPTIONS>
+            Require all granted
+        </Limit>
+    </Directory>
+
+    # Expose these DBs only, plus the temp files an atomic save writes first.
+    #
+    # Every client saves atomically — PUT a temp file, DELETE the target,
+    # MOVE the temp over it — but they do not spell the temp name the same
+    # way, and the authz rule sees the temp name, not the target:
+    #
+    #   KeePass 2.x  -> `ludovic.tmp.37584450.kdbx`  (marker before .kdbx)
+    #   KeePassXC    -> `ludovic.kdbx.tmp`           (marker after .kdbx)
+    #
+    # Both have already cost a silent outage. The first shape was missing
+    # until 2026-09-09 and every save 403'd for four days; anchoring the
+    # pattern then fixed that shape and newly denied the second, which broke
+    # the laptop on 2026-09-14. Both times only the write failed: `GET
+    # /ludovic.kdbx` kept answering 200, the pod stayed Healthy, ArgoCD
+    # Synced. The /_canary monitor below does not cover this — it proves the
+    # service accepts writes, not that it accepts YOUR client's temp name.
+    #
+    # `_canary` is in the list on purpose and is NOT a database: it lets the
+    # write canary exercise both temp shapes above without ever writing a name
+    # a real client might MOVE. If the canary wrote `ludovic.kdbx.tmp` while
+    # the laptop was mid-save, the client's MOVE would rename the canary's
+    # nonce over `ludovic.kdbx` and destroy the database while reporting
+    # success. See nixos-iac/scripts/webdav_write_canary.sh.
+    #
+    # Kept deliberately tight: the six known basenames plus `_canary`, an
+    # optional temp segment of digits only, .kdbx, an optional .tmp suffix,
+    # anchored at both ends. Anything else in /data still falls through to
+    # `Require all denied` above — the canary asserts that too, by PUTting
+    # `/_canary.kdbx.tmp.nope` and requiring a 403.
+    <LocationMatch "^/(ludovic|parola|lea|finances|danielle|louis|_canary)(\.tmp\.[0-9]+)?\.kdbx(\.tmp)?$">
+        Require all granted
+    </LocationMatch>
+
+    # One scratch path so a monitor can prove WRITES still work.
+    #
+    # A read-only check on a read-write service proves nothing: the 403 above
+    # ran for four days while `GET /ludovic.kdbx` answered 200 the whole time,
+    # the pod stayed Healthy and ArgoCD stayed Synced. Nothing noticed until a
+    # rotated secret failed to reach the machine that reads this database.
+    # So the canary PUTs here, reads it back, compares, and deletes it —
+    # exercising the same tunnel, the same basic auth and the same authz rules
+    # a real save does, without ever touching a real .kdbx.
+    #
+    # Exactly one literal path, no pattern: it cannot be aimed at a database,
+    # and everything else in /data still falls through to `Require all denied`.
+    # Basic auth at the Traefik edge still applies — this widens what an
+    # ALREADY authenticated caller may write, not who may write.
+    <Location "/_canary">
+        Require all granted
+    </Location>

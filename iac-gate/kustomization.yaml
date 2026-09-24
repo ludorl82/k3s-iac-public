@@ -1,0 +1,21 @@
+# Kustomize only so gate.py can live as a real file (readable, testable,
+# linted) instead of a string inside a ConfigMap. Argo CD renders it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: iac-gate
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - cronjob.yaml
+
+configMapGenerator:
+  - name: iac-gate-scripts
+    files:
+      - gate.py
+      - apps.json
+      - known_hosts
+
+generatorOptions:
+  disableNameSuffixHash: true

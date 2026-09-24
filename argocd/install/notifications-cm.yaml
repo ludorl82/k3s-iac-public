@@ -1,0 +1,45 @@
+# Argo CD notifications → ntfy (topic "alerts", same one Kuma uses), replacing
+# the retired nightly k3s drift check (iac-drift k3s half, Kuma monitor 41,
+# retired 2026-07-31): Argo knows live-vs-git continuously, so drift alerting
+# belongs to the deployer, not to a bolt-on cron. Fires on health degradation
+# and on failed syncs; deliberate OutOfSync (operator state, unmerged drift)
+# stays a dashboard colour, not a page — that is the no-selfHeal doctrine's
+# alerting corollary.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+data:
+  service.webhook.ntfy: |
+    url: http://ntfy.ntfy.svc.cluster.local/alerts
+    headers:
+      - name: X-Title
+        value: Argo CD
+      # $ntfy-token resolves from argocd-notifications-secret (out-of-band,
+      # per the secrets doctrine): a write-only ntfy user scoped to 'alerts'.
+      - name: Authorization
+        value: Bearer $ntfy-token
+  template.app-degraded: |
+    webhook:
+      ntfy:
+        method: POST
+        body: |
+          {{.app.metadata.name}}: health {{.app.status.health.status}} (sync {{.app.status.sync.status}})
+  template.app-sync-failed: |
+    webhook:
+      ntfy:
+        method: POST
+        body: |
+          {{.app.metadata.name}}: sync {{.app.status.operationState.phase}} — {{.app.status.operationState.message}}
+  trigger.on-health-degraded: |
+    - when: app.status.health.status == 'Degraded'
+      send: [app-degraded]
+  trigger.on-sync-failed: |
+    - when: app.status.operationState != nil and app.status.operationState.phase in ['Error', 'Failed']
+      send: [app-sync-failed]
+  subscriptions: |
+    - recipients:
+        - ntfy
+      triggers:
+        - on-health-degraded
+        - on-sync-failed

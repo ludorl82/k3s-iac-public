@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: iac-gate
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:ludorl82/k3s-iac.git
+    targetRevision: main
+    path: iac-gate
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: iac-gate
+  # Apply on merge only (automated, no prune, no selfHeal): live drift is
+  # shown, never reverted — operator state is not drift.
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - RespectIgnoreDifferences=true

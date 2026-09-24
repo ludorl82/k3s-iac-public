@@ -1,0 +1,35 @@
+# k3s auto-detects /usr/bin/nvidia-container-runtime on agent start and adds
+# an "nvidia" runtime to its containerd config, but the cluster-side
+# RuntimeClass object has to be created by hand. Pods opt in with
+# runtimeClassName: nvidia; only schedulable on nodes where the toolkit is
+# installed (gpu-02, and gpu-01 since 2026-07-22 — general GPU node, 2x RTX
+# 3060, gpu=nvidia label and no taint; the vm-01 VM it used to host was
+# retired 2026-07-24).
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia
+---
+# Same toolkit, but the CDI-based variant of the runtime
+# (nvidia-container-runtime.cdi), which k3s registers as the "nvidia-cdi"
+# handler alongside "nvidia".
+#
+# This one exists because of NixOS. On gpu-02 (NixOS since 2026-07-24) the
+# plain "nvidia" handler half-works in a way that's easy to misread: it DOES
+# inject /dev/nvidia* into the container, so the devices are there, but it
+# does NOT bring in the driver userspace, because it discovers libraries in
+# standard FHS locations that hold nothing on NixOS. Result is a container
+# with GPU device nodes, no libcuda/libnvidia-encode, and no nvidia-smi —
+# i.e. Frigate's ONNX detector and NVDEC/nvenc would fail at runtime rather
+# than fail to start.
+#
+# The CDI variant instead consumes the CDI spec that NixOS's
+# hardware.nvidia-container-toolkit generates at /var/run/cdi, which carries
+# the correct /nix/store driver paths. Verified: nvidia-smi inside the pod
+# sees the RTX 3060.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia-cdi
+handler: nvidia-cdi

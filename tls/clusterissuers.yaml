@@ -1,0 +1,49 @@
+# Two issuers, identical but for the server. ALWAYS go through staging first:
+# its certificates are trusted by nobody, but its limits are generous. A wrong
+# configuration tried against production burns Let's Encrypt's failed-
+# validation quota within minutes.
+#
+# No email address: Let's Encrypt stopped sending expiry notices in 2025, and
+# an address here would trip the "email address" gate of this repo's public
+# snapshot.
+#
+# The Cloudflare token lives OUTSIDE the repo, like every secret here: see the
+# README, tls/ section. A ClusterIssuer reads its secrets from cert-manager's
+# own namespace.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-staging-account
+    solvers:
+      - selector:
+          dnsZones:
+            - lab.example
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account
+    solvers:
+      - selector:
+          dnsZones:
+            - lab.example
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token

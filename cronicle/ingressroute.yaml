@@ -1,0 +1,42 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: cronicle
+spec:
+  redirectScheme:
+    permanent: true
+    scheme: https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: cronicle
+  namespace: cronicle
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`cronicle.lab.example`) || Host(`cronicle.pub.example.com`)
+      middlewares:
+        - name: redirect-to-https
+      services:
+        - name: cronicle
+          port: 80
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: cronicle-secure
+  namespace: cronicle
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`cronicle.lab.example`) || Host(`cronicle.pub.example.com`)
+      services:
+        - name: cronicle
+          port: 80
+  tls: {}

@@ -1,0 +1,179 @@
+# Full config.json for Cronicle, mounted over the image default at
+# /opt/cronicle/conf/config.json. This exists because 0.9.x has no env-var
+# config overrides — the only way to change the storage engine declaratively
+# is to own the whole file. Everything here except the Storage block is a
+# verbatim copy of the image's baked-in default (soulteary/cronicle,
+# Cronicle 0.9.80); diff against the image before bumping it.
+#
+# Storage is the S3 engine: the pod is stateless, all data (events, users,
+# API keys, history, completed job logs) lives in cronicle-data-example-com
+# (cloud-01-iac). No credentials appear below — the engine falls back to the AWS
+# SDK default chain, which picks up the AWS_* env vars provided by the
+# out-of-band Secret cronicle-s3-credentials (see deployment.yaml).
+#
+# secret_key looks like a secret but is the public image's baked-in default,
+# shared by every user of that image — it only guards multi-server comms,
+# and this is a single-server install. Keeping it verbatim preserves auth
+# continuity; changing it would buy nothing.
+#
+# The LRU cache matters here: without it every storage read is a WAN round
+# trip to the public S3 endpoint.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cronicle-config
+  namespace: cronicle
+data:
+  config.json: |
+    {
+      "base_app_url": "http://localhost:3012",
+      "email_from": "admin@localhost",
+      "smtp_hostname": "localhost",
+      "smtp_port": 25,
+      "max_emails_per_day": 0,
+      "secret_key": "fcd49a067468e668d39d311db3550313",
+
+      "log_dir": "logs",
+      "log_filename": "[component].log",
+      "log_columns": ["hires_epoch", "date", "hostname", "pid", "component", "category", "code", "msg", "data"],
+      "log_archive_path": "logs/archives/[yyyy]/[mm]/[dd]/[filename]-[yyyy]-[mm]-[dd].log.gz",
+      "log_crashes": true,
+      "copy_job_logs_to": "",
+      "queue_dir": "queue",
+      "pid_file": "logs/cronicled.pid",
+      "debug_level": 5,
+      "maintenance": "04:00",
+      "list_row_max": 10000,
+      "job_data_expire_days": 180,
+      "child_kill_timeout": 10,
+      "dead_job_timeout": 120,
+      "master_ping_freq": 20,
+      "master_ping_timeout": 60,
+      "udp_broadcast_port": 3014,
+      "scheduler_startup_grace": 10,
+      "universal_web_hook": "",
+      "track_manual_jobs": false,
+      "max_jobs": 0,
+
+      "server_comm_use_hostnames": false,
+      "web_direct_connect": false,
+      "web_socket_use_hostnames": false,
+
+      "job_memory_max": 1073741824,
+      "job_memory_sustain": 0,
+      "job_cpu_max": 0,
+      "job_cpu_sustain": 0,
+      "job_log_max_size": 0,
+      "job_env": {},
+
+      "web_hook_text_templates": {
+        "job_start": "Job started on [hostname]: [event_title] [job_details_url]",
+        "job_complete": "Job completed successfully on [hostname]: [event_title] [job_details_url]",
+        "job_failure": "Job failed on [hostname]: [event_title]: Error [code]: [description] [job_details_url]",
+        "job_launch_failure": "Failed to launch scheduled event: [event_title]: [description] [edit_event_url]"
+      },
+
+      "client": {
+        "name": "Cronicle",
+        "debug": 1,
+        "default_password_type": "password",
+        "privilege_list": [
+          { "id": "admin", "title": "Administrator" },
+          { "id": "create_events", "title": "Create Events" },
+          { "id": "edit_events", "title": "Edit Events" },
+          { "id": "delete_events", "title": "Delete Events" },
+          { "id": "run_events", "title": "Run Events" },
+          { "id": "abort_events", "title": "Abort Events" },
+          { "id": "state_update", "title": "Toggle Scheduler" }
+        ],
+        "new_event_template": {
+          "enabled": 1,
+          "params": {},
+          "timing": { "minutes": [0] },
+          "max_children": 1,
+          "timeout": 3600,
+          "catch_up": 0,
+          "queue_max": 1000
+        }
+      },
+
+      "Storage": {
+        "engine": "S3",
+        "list_page_size": 50,
+        "concurrency": 4,
+        "log_event_types": { "get": 1, "put": 1, "head": 1, "delete": 1, "expire_set": 1 },
+
+        "transactions": true,
+        "trans_auto_recover": true,
+
+        "AWS": {
+          "region": "ca-central-1"
+        },
+        "S3": {
+          "keyPrefix": "cronicle",
+          "fileExtensions": true,
+          "cache": {
+            "enabled": true,
+            "maxItems": 1000,
+            "maxBytes": 10485760
+          },
+          "params": {
+            "Bucket": "cronicle-data-example-com"
+          }
+        }
+      },
+
+      "WebServer": {
+        "http_port": 3012,
+        "http_htdocs_dir": "htdocs",
+        "http_max_upload_size": 104857600,
+        "http_static_ttl": 3600,
+        "http_static_index": "index.html",
+        "http_server_signature": "Cronicle 1.0",
+        "http_gzip_text": true,
+        "http_timeout": 30,
+        "http_regex_json": "(text|javascript|js|json)",
+        "http_response_headers": {
+          "Access-Control-Allow-Origin": "*"
+        },
+
+        "https": false,
+        "https_port": 3013,
+        "https_cert_file": "conf/ssl.crt",
+        "https_key_file": "conf/ssl.key",
+        "https_force": false,
+        "https_timeout": 30,
+        "https_header_detect": {
+          "Front-End-Https": "^on$",
+          "X-Url-Scheme": "^https$",
+          "X-Forwarded-Protocol": "^https$",
+          "X-Forwarded-Proto": "^https$",
+          "X-Forwarded-Ssl": "^on$"
+        }
+      },
+
+      "User": {
+        "session_expire_days": 30,
+        "max_failed_logins_per_hour": 5,
+        "max_forgot_passwords_per_hour": 3,
+        "free_accounts": false,
+        "sort_global_users": true,
+        "use_bcrypt": true,
+
+        "email_templates": {
+          "welcome_new_user": "conf/emails/welcome_new_user.txt",
+          "changed_password": "conf/emails/changed_password.txt",
+          "recover_password": "conf/emails/recover_password.txt"
+        },
+
+        "default_privileges": {
+          "admin": 0,
+          "create_events": 1,
+          "edit_events": 1,
+          "delete_events": 1,
+          "run_events": 0,
+          "abort_events": 0,
+          "state_update": 0
+        }
+      }
+    }

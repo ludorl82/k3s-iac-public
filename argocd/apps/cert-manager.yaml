@@ -1,0 +1,50 @@
+# cert-manager: obtains and renews the *.lab.example certificate from Let's
+# Encrypt, validating over DNS on the lab.example Cloudflare zone.
+#
+# WHY. The previous *.lab.example came from the private CA pki.example.com and
+# was valid for ten years (2024-2034). macOS refuses any TLS server certificate
+# valid for more than 825 days, even when it chains to a trusted root: every
+# Apple device rejected kuma, grafana, frigate and the rest, Chrome and Safari
+# included. Confirmed with `security verify-cert -p ssl` on the Mac: root
+# accepted, server certificate rejected. Let's Encrypt issues for 90 days,
+# renews on its own, and is trusted everywhere without installing a root.
+#
+# THE FIRST HELM CHART in this repo. Renovate only follows Kubernetes manifests
+# (renovate.json: kubernetes, kustomize), so this version does not move by
+# itself. Deliberate for a component every HTTPS service depends on: bump it by
+# hand, after reading the release notes.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: v1.21.2
+    helm:
+      valuesObject:
+        crds:
+          enabled: true
+        # Propagation checks go through PUBLIC resolvers. The cluster resolver
+        # ends at pfSense's Unbound, which answers lab.example itself and would
+        # never see the _acme-challenge record cert-manager puts at
+        # Cloudflare. Verified 2026-09-23 from a pod: 1.1.1.1 and 8.8.8.8
+        # answer for real, pfSense does not intercept them.
+        extraArgs:
+          - --dns01-recursive-nameservers-only
+          - --dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - CreateNamespace=true
+      # cert-manager's CRDs exceed the size allowed for a client-side apply's
+      # last-applied annotation.
+      - ServerSideApply=true

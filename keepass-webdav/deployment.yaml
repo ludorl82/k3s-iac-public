@@ -1,0 +1,105 @@
+# WebDAV endpoint for vault.family.example (KeePass mobile clients).
+#
+# Moved out of cloud-01's Docker `web-docker` stack on 2026-08-06 so the legacy
+# `keepass-webdav` Cloudflare tunnel could be retired — see keepass-webdav/README
+# notes in the repo README.
+#
+# PINNED TO THE `cloud-01` NODE, deliberately and permanently. The .kdbx files are the
+# live databases and they must NOT move: `keepass-watch.service` on the cloud-01 *host*
+# watches this exact directory with inotifywait (IN_CLOSE_WRITE + IN_MOVED_TO) and
+# fires the KeePass sync pipeline on every save. Serving them from anywhere else —
+# an NFS PVC, another node — would silently sever that trigger: WebDAV would keep
+# working, saves would keep returning 201, the sync would just stop. So the pod
+# goes to the data, not the other way round: nodeSelector + hostPath.
+#
+# hostPath points at the real directory rather than the /opt/keepass symlink, so
+# the mount does not depend on symlink resolution inside kubelet.
+#
+# This was /var/lib/docker/volumes/numeriseur-docker_keepass2-home/_data until
+# 2026-08-07 — a docker volume belonging to no compose stack, on a host running
+# no docker stacks. Renamed to /var/lib/keepass in its own change, with this
+# Deployment scaled to zero and the host's keepass-watch stopped for the move.
+# The path is declared in nixos-iac (hosts/cloud-01) by a tmpfiles `d` rule, so it
+# exists on a fresh boot before this pod tries to bind to it.
+#
+# replicas: 1 with Recreate — two httpd pods writing the same .kdbx over WebDAV
+# would race, and rolling updates would briefly double-mount.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webdav
+  namespace: keepass-webdav
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: webdav
+  template:
+    metadata:
+      labels:
+        app: webdav
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: cloud-01
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: controlplane
+          effect: NoSchedule
+      securityContext:
+        # The .kdbx files are owned 1006:1006 on the host; httpd must write them
+        # (WebDAV PUT + atomic rename). Same uid the Docker container ran as.
+        runAsUser: 1006
+        runAsGroup: 1006
+      containers:
+        - name: httpd
+          image: httpd:2.4
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: httpd-conf
+              mountPath: /usr/local/apache2/conf/httpd.conf
+              subPath: httpd.conf
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          livenessProbe:
+            # tcpSocket, not httpGet: DocumentRoot is `Require all denied`, so a
+            # perfectly healthy server answers GET / with 403 — and kubelet only
+            # treats 200-399 as success, so an httpGet probe here would crashloop
+            # the pod. Auth lives at the Traefik edge, so there is no unauthed
+            # path that returns 2xx to probe instead.
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: data
+          hostPath:
+            path: /var/lib/keepass
+            type: Directory
+        - name: httpd-conf
+          configMap:
+            name: httpd-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webdav
+  namespace: keepass-webdav
+spec:
+  selector:
+    app: webdav
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

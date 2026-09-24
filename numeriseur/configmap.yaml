@@ -1,0 +1,226 @@
+# Everything that used to be baked into the custom image lives here now.
+#
+# The image is stock drakkan/sftpgo. What made it custom was the post-upload
+# hook (imagemagick + rclone + awscli + openssh-client) and the envsubst
+# templating that fed it; the hook is an EventBridge Lambda as of 2026-08-05
+# (cloud-01-iac live/numeriseur.tf), and the templating is the initContainer below.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sftpgo-config
+  namespace: numeriseur
+data:
+  # No $VARS in here at all -- this file is copied, not templated. It was only
+  # ever run through envsubst because start.sh ran both files through it.
+  sftpgo.json: |
+    {
+      "common": {
+        "temp_path": "/var/lib/sftpgo/tmp"
+      },
+      "sftpd": {
+        "bindings": [
+          { "port": 2022, "address": "" }
+        ],
+        "host_keys": ["/etc/sftpgo/host_keys/id_ed25519", "/etc/sftpgo/host_keys/id_rsa"],
+        "host_key_algorithms": ["ssh-ed25519", "rsa-sha2-512", "rsa-sha2-256", "ssh-rsa"],
+        "public_key_algorithms": ["ssh-ed25519", "rsa-sha2-512", "rsa-sha2-256", "ssh-rsa"]
+      },
+      "httpd": {
+        "bindings": [
+          {
+            "port": 8080,
+            "address": "0.0.0.0",
+            "enable_web_admin": false,
+            "enable_web_client": false,
+            "enable_rest_api": true
+          }
+        ]
+      },
+      "data_provider": {
+        "driver": "sqlite",
+        "name": "/var/lib/sftpgo/sftpgo.db"
+      }
+    }
+
+  # Unchanged from the image's template. The placeholders are substituted by
+  # render.sh below.
+  users.json: |
+    {
+      "users": [
+        {
+          "username": "ludo",
+          "password": "$LUDO_PASSWORD",
+          "public_keys": ["$PRINTER_PUBLIC_KEY"],
+          "status": 1,
+          "home_dir": "/srv/sftpgo/ludo",
+          "permissions": { "/": ["*"] },
+          "filesystem": {
+            "provider": 1,
+            "s3config": {
+              "bucket": "$S3_BUCKET",
+              "region": "$AWS_REGION",
+              "access_key": "$AWS_ACCESS_KEY_ID",
+              "access_secret": { "status": "Plain", "payload": "$AWS_SECRET_ACCESS_KEY" },
+              "key_prefix": "ludo/"
+            }
+          }
+        },
+        {
+          "username": "lea",
+          "password": "$LEA_PASSWORD",
+          "public_keys": ["$PRINTER_PUBLIC_KEY"],
+          "status": 1,
+          "home_dir": "/srv/sftpgo/lea",
+          "permissions": { "/": ["*"] },
+          "filesystem": {
+            "provider": 1,
+            "s3config": {
+              "bucket": "$S3_BUCKET",
+              "region": "$AWS_REGION",
+              "access_key": "$AWS_ACCESS_KEY_ID",
+              "access_secret": { "status": "Plain", "payload": "$AWS_SECRET_ACCESS_KEY" },
+              "key_prefix": "lea/"
+            }
+          }
+        },
+        {
+          "username": "ludoetlea",
+          "password": "$LUDOETLEA_PASSWORD",
+          "public_keys": ["$PRINTER_PUBLIC_KEY"],
+          "status": 1,
+          "home_dir": "/srv/sftpgo/ludoetlea",
+          "permissions": { "/": ["*"] },
+          "filesystem": {
+            "provider": 1,
+            "s3config": {
+              "bucket": "$S3_BUCKET",
+              "region": "$AWS_REGION",
+              "access_key": "$AWS_ACCESS_KEY_ID",
+              "access_secret": { "status": "Plain", "payload": "$AWS_SECRET_ACCESS_KEY" },
+              "key_prefix": "ludoetlea/"
+            }
+          }
+        },
+        {
+          "username": "photos",
+          "password": "$PHOTOS_PASSWORD",
+          "public_keys": ["$PRINTER_PUBLIC_KEY"],
+          "status": 1,
+          "home_dir": "/srv/sftpgo/photos",
+          "permissions": { "/": ["*"] },
+          "filesystem": {
+            "provider": 1,
+            "s3config": {
+              "bucket": "$S3_BUCKET",
+              "region": "$AWS_REGION",
+              "access_key": "$AWS_ACCESS_KEY_ID",
+              "access_secret": { "status": "Plain", "payload": "$AWS_SECRET_ACCESS_KEY" },
+              "key_prefix": "photos/"
+            }
+          }
+        },
+        {
+          "username": "cartes",
+          "password": "$CARTES_PASSWORD",
+          "public_keys": ["$PRINTER_PUBLIC_KEY"],
+          "status": 1,
+          "home_dir": "/srv/sftpgo/cartes",
+          "permissions": { "/": ["*"] },
+          "filesystem": {
+            "provider": 1,
+            "s3config": {
+              "bucket": "$S3_BUCKET",
+              "region": "$AWS_REGION",
+              "access_key": "$AWS_ACCESS_KEY_ID",
+              "access_secret": { "status": "Plain", "payload": "$AWS_SECRET_ACCESS_KEY" },
+              "key_prefix": "cartes/"
+            }
+          }
+        }
+      ]
+    }
+
+  # Replaces start.sh. What is NOT here is as important as what is:
+  #
+  #   - no ssh-keygen block. The host keys come from the numeriseur-sftpgo-hostkeys
+  #     Secret and have since 2026-07-21; the generate-if-missing branch had been
+  #     dead code ever since. The stock image has no ssh-keygen at all, so the
+  #     Secret is now the only possible source -- which is the right shape
+  #     anyway: a regenerated host key is a printer that stops connecting.
+  #   - no /etc/cloud-01/credentials, /etc/cloud-01/config or bucket.env. Those existed
+  #     purely because sftpgo strips the environment before running action
+  #     hooks. No hook, no workaround.
+  #   - no writable copy of rclone.conf. rclone is gone.
+  render.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    install -m 0644 /config/sftpgo.json /runtime/sftpgo.json
+
+    # Secret values can carry a trailing newline (e.g. pasted into KeePass);
+    # strip it so it does not land inside a JSON string and break parsing.
+    PRINTER_PUBLIC_KEY="$(printf '%s' "${PRINTER_PUBLIC_KEY:-}" | tr -d '\n\r')"
+
+    template="$(cat /config/users.json)"
+
+    # Bash-native substitution rather than envsubst: the stock image ships bash
+    # but not gettext-base. ${var//needle/replacement} is also safer than sed
+    # here -- the replacement is literal, so a password containing / & or \
+    # needs no escaping.
+    #
+    # Caveat inherited from envsubst, not introduced here: a value containing a
+    # double quote or a backslash still produces invalid JSON. The passwords are
+    # generated, so this has never bitten.
+    subst() {
+      template="${template//"$1"/"$2"}"
+    }
+
+    subst '$LUDO_PASSWORD'         "$LUDO_PASSWORD"
+    subst '$LEA_PASSWORD'          "$LEA_PASSWORD"
+    subst '$LUDOETLEA_PASSWORD'    "$LUDOETLEA_PASSWORD"
+    subst '$PHOTOS_PASSWORD'       "$PHOTOS_PASSWORD"
+    subst '$CARTES_PASSWORD'       "$CARTES_PASSWORD"
+    subst '$PRINTER_PUBLIC_KEY'    "$PRINTER_PUBLIC_KEY"
+    subst '$S3_BUCKET'             "$S3_BUCKET"
+    subst '$AWS_REGION'            "$AWS_REGION"
+    subst '$AWS_ACCESS_KEY_ID'     "$AWS_ACCESS_KEY_ID"
+    subst '$AWS_SECRET_ACCESS_KEY' "$AWS_SECRET_ACCESS_KEY"
+
+    # Fail here rather than letting sftpgo start with a half-rendered file: an
+    # unsubstituted $VAR would silently become a literal password.
+    if grep -q '\$[A-Z_]\{3,\}' <<<"$template"; then
+      echo "render.sh: unsubstituted placeholder left in users.json:" >&2
+      grep -o '\$[A-Z_]\{3,\}' <<<"$template" | sort -u >&2
+      exit 1
+    fi
+
+    # Validate the printer key SHAPE, because sftpgo's failure mode here is
+    # genuinely nasty: a public key it cannot parse aborts the whole
+    # --loaddata-from restore ("unable to load initial data"), yet the process
+    # keeps running and /healthz keeps answering 200. The pod would go Ready
+    # with ZERO users configured and the scanner would be refused at login,
+    # with nothing unhealthy to point at.
+    #
+    # That used to be masked: users lived on the PVC, so a bad render left the
+    # previous users in the database. The sqlite provider is an emptyDir now
+    # and is rebuilt from this file on every start, so a bad render is a total
+    # outage. Refuse to start instead.
+    if ! grep -qE '^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp[0-9]+) AAAA[A-Za-z0-9+/]+=*( |$)' <<<"$PRINTER_PUBLIC_KEY"; then
+      echo "render.sh: PRINTER_PUBLIC_KEY does not look like an SSH public key" >&2
+      echo "render.sh: got ${#PRINTER_PUBLIC_KEY} chars starting '${PRINTER_PUBLIC_KEY:0:16}'" >&2
+      exit 1
+    fi
+
+    # Same reasoning for the passwords: sftpgo rejects an empty one, and one
+    # rejected user aborts the entire restore.
+    for u in LUDO LEA LUDOETLEA PHOTOS CARTES; do
+      v="${u}_PASSWORD"
+      if [ -z "${!v:-}" ]; then
+        echo "render.sh: $v is empty" >&2
+        exit 1
+      fi
+    done
+
+    umask 077
+    printf '%s' "$template" > /runtime/users.json
+    echo "render.sh: wrote /runtime/sftpgo.json and /runtime/users.json"
