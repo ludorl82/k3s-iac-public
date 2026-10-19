@@ -1,0 +1,30 @@
+# The ACME issuers and the *.lab.example certificate. A SEPARATE app from
+# cert-manager because these objects need the CRDs cert-manager installs: on
+# the very first sync they do not exist yet, hence SkipDryRunOnMissingResource
+# and the retries.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tls
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:ludorl82/k3s-iac.git
+    targetRevision: main
+    path: tls
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m

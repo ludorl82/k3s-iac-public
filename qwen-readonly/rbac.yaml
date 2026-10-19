@@ -1,0 +1,75 @@
+# Qwen Code on the console (the office voice assistant, nixos-iac
+# qwen-voice-bridge) looks at the cluster, it never changes it: Ludo keeps
+# changes to Claude. This ServiceAccount is bound to the built-in `view`
+# ClusterRole — get/list/watch on nearly everything, pod logs included,
+# and NOT secrets, exec, port-forward or any write. The API server refuses a
+# write whatever the model tries, which is the point: a permission rule in
+# Qwen Code can be argued with, a 403 cannot.
+#
+# The console builds its kubeconfig at session start from the token Secret
+# below (read with the admin kubeconfig, never written to git).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: qwen
+  namespace: qwen-readonly
+---
+# Long-lived token (Kubernetes no longer creates one per ServiceAccount).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: qwen-token
+  namespace: qwen-readonly
+  annotations:
+    kubernetes.io/service-account.name: qwen
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: qwen-readonly-view
+subjects:
+  - kind: ServiceAccount
+    name: qwen
+    namespace: qwen-readonly
+roleRef:
+  kind: ClusterRole
+  name: view
+  apiGroup: rbac.authorization.k8s.io
+---
+# `view` covers namespaced resources only. The cluster-scoped ones a health
+# check needs — nodes, namespaces, volumes, Argo CD applications, metrics —
+# are read here, and only read.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: qwen-readonly-cluster
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces", "persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: qwen-readonly-cluster
+subjects:
+  - kind: ServiceAccount
+    name: qwen
+    namespace: qwen-readonly
+roleRef:
+  kind: ClusterRole
+  name: qwen-readonly-cluster
+  apiGroup: rbac.authorization.k8s.io

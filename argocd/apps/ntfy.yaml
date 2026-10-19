@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ntfy
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:ludorl82/k3s-iac.git
+    targetRevision: main
+    path: ntfy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ntfy
+  # Apply on merge only, never revert operator state between merges. First
+  # app flipped to automated (2026-07-30): kubectl diff was clean across the
+  # whole repo, so the first sync only stamps tracking annotations.
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - RespectIgnoreDifferences=true
+  # replicas is operator state (maintenance scale-to-zero is intent, not
+  # drift) — never part of the diff, never reverted by a sync.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/replicas

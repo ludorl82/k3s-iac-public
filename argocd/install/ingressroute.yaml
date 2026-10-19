@@ -1,0 +1,52 @@
+# argocd.lab.example — internal UI access through the k3s ingress, same pattern
+# as unifi (HTTPS backend with a self-signed cert, so the transport skips
+# verification). LAN-only: the name exists solely as a pfSense Unbound
+# override pointing at 198.51.100.7; nothing public routes here. This was the
+# backlog's "optional" item — promoted from port-forward-only once the UI
+# earned its keep during the 2026-07-31 majors incident.
+#
+# argocd-server runs with server.insecure (cmd-params-cm) so Traefik
+# terminates TLS and the backend is plain HTTP — the canonical ingress
+# setup, and the only one where the UI's event stream actually streams.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: argocd
+spec:
+  redirectScheme:
+    permanent: true
+    scheme: https
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`argocd.lab.example`)
+      middlewares:
+        - name: redirect-to-https
+      services:
+        - name: argocd-server
+          port: 80
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: argocd-tls
+  namespace: argocd
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`argocd.lab.example`)
+      services:
+        - name: argocd-server
+          port: 80
+  tls: {}

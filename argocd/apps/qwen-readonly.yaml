@@ -1,0 +1,19 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: qwen-readonly
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:ludorl82/k3s-iac.git
+    targetRevision: main
+    path: qwen-readonly
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: qwen-readonly
+  # Apply on merge only (automated, no prune, no selfHeal), like the others.
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false

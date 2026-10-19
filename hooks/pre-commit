@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Pre-commit checks for the IaC repos.
+#
+# Enabled by `git config core.hooksPath hooks`, which the nix devshell does for
+# you. Bypass a single commit with `git commit --no-verify` when you genuinely
+# need to — a hook people cannot bypass is a hook people delete.
+#
+# Everything here inspects STAGED content (git show :file), not the working
+# tree, so a partially staged file is judged on what is actually being
+# committed.
+
+set -uo pipefail
+
+fail=0
+yaml_unchecked=0
+note() { printf '  %s\n' "$*" >&2; }
+problem() { printf '\npre-commit: %s\n' "$*" >&2; fail=1; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# ---------------------------------------------------------------------------
+# 1. Files that must never be committed
+# ---------------------------------------------------------------------------
+#
+# tpp-iac has terraform.tfstate and .tfvars (with a live-looking cf_key) in its
+# history since 2024. History is forever; this is the cheap way to not do it
+# again.
+
+blocked=$(printf '%s\n' "$staged" | grep -E \
+  '(^|/)\.terraform/|\.tfstate($|\.)|\.tfvars$|\.pem$|(^|/)id_[rd]sa$|(^|/)kubeconfig$|\.kube/config$' \
+  || true)
+
+if [ -n "$blocked" ]; then
+  problem "refusing to commit files that should never be in git:"
+  printf '%s\n' "$blocked" | sed 's/^/    /' >&2
+  note "state belongs in S3, secrets in KeePass."
+  note "if a .tfvars here is genuinely non-sensitive, rename it *.tfvars.example"
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Secret material in staged content
+# ---------------------------------------------------------------------------
+#
+# Deliberately narrow, high-confidence patterns. A scanner that cries wolf gets
+# switched off, so this looks for credential shapes that are unambiguous rather
+# than trying to catch everything.
+
+scan_secrets() {
+  local file="$1" content
+  content=$(git show ":$file" 2>/dev/null) || return 0
+
+  # Skip this hook itself, which necessarily contains the patterns.
+  case "$file" in hooks/pre-commit) return 0 ;; esac
+
+  local hits=""
+  grep -qE 'AKIA[0-9A-Z]{16}'            <<<"$content" && hits="$hits AWS-access-key-id"
+  grep -qE 'ASIA[0-9A-Z]{16}'            <<<"$content" && hits="$hits AWS-temp-access-key"
+  grep -qE '1//0[A-Za-z0-9_-]{20,}'      <<<"$content" && hits="$hits Google-refresh-token"
+  grep -qE 'ya29\.[A-Za-z0-9._-]{20,}'   <<<"$content" && hits="$hits Google-access-token"
+  grep -qE 'gh[pousr]_[A-Za-z0-9]{30,}'  <<<"$content" && hits="$hits GitHub-token"
+  grep -qE 'BEGIN [A-Z ]*PRIVATE KEY'    <<<"$content" && hits="$hits private-key"
+  grep -qiE 'aws_secret_access_key[[:space:]]*[=:][[:space:]]*["'\'']?[A-Za-z0-9/+=]{40}' \
+                                         <<<"$content" && hits="$hits AWS-secret-key"
+  # api_token on its own catches the cloudflare provider block, which is the
+  # form that actually shows up — the provider should read the env var instead.
+  grep -qiE '(cf_key|api_token|cloudflare_api_(key|token))[[:space:]]*[=:][[:space:]]*["'\'']?[A-Za-z0-9_-]{30,}' \
+                                         <<<"$content" && hits="$hits Cloudflare-credential"
+
+  if [ -n "$hits" ]; then
+    problem "possible secret in $file:$hits"
+    note "if this is a false positive, --no-verify and say why in the message"
+  fi
+}
+
+while IFS= read -r f; do
+  [ -n "$f" ] && scan_secrets "$f"
+done <<<"$staged"
+
+# ---------------------------------------------------------------------------
+# 3. Terraform / OpenTofu formatting
+# ---------------------------------------------------------------------------
+
+tf_files=$(printf '%s\n' "$staged" | grep -E '\.tf$' || true)
+
+if [ -n "$tf_files" ]; then
+  if command -v tofu >/dev/null 2>&1; then
+    unformatted=$(tofu fmt -check -list=true $tf_files 2>/dev/null || true)
+    if [ -n "$unformatted" ]; then
+      problem "not formatted (run 'tofu fmt'):"
+      printf '%s\n' "$unformatted" | sed 's/^/    /' >&2
+    fi
+
+    # validate needs initialised providers; only worth attempting where they
+    # already exist, otherwise this would download providers on every commit.
+    for dir in $(printf '%s\n' "$tf_files" | xargs -r -n1 dirname | sort -u); do
+      if [ -d "$dir/.terraform" ]; then
+        if ! out=$(tofu -chdir="$dir" validate -no-color 2>&1); then
+          problem "tofu validate failed in $dir:"
+          printf '%s\n' "$out" | sed 's/^/    /' >&2
+        fi
+      fi
+    done
+  else
+    note "pre-commit: tofu not on PATH, skipping fmt/validate (use 'nix develop')"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Shell, JSON, YAML syntax
+# ---------------------------------------------------------------------------
+
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    *.sh)
+      if ! git show ":$f" | bash -n 2>/dev/null; then
+        problem "shell syntax error in $f"
+      fi
+      ;;
+    *.json)
+      if command -v python3 >/dev/null 2>&1; then
+        if ! git show ":$f" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
+          problem "invalid JSON in $f"
+        fi
+      fi
+      ;;
+    *.yaml|*.yml)
+      # Try each parser in turn. A silently skipped check is worse than no
+      # check at all -- if none of these exist, say so rather than passing
+      # quietly, because an unparseable manifest would sail straight through.
+      if python3 -c 'import yaml' 2>/dev/null; then
+        git show ":$f" | python3 -c 'import yaml,sys; list(yaml.safe_load_all(sys.stdin))' 2>/dev/null \
+          || problem "invalid YAML in $f"
+      elif command -v ruby >/dev/null 2>&1; then
+        git show ":$f" | ruby -ryaml -e 'YAML.load_stream(STDIN.read)' 2>/dev/null \
+          || problem "invalid YAML in $f"
+      elif command -v yq >/dev/null 2>&1; then
+        git show ":$f" | yq . >/dev/null 2>&1 \
+          || problem "invalid YAML in $f"
+      else
+        yaml_unchecked=1
+      fi
+      ;;
+  esac
+done <<<"$staged"
+
+# ---------------------------------------------------------------------------
+
+if [ "$yaml_unchecked" -ne 0 ]; then
+  note "pre-commit: no YAML parser found (python3+pyyaml, ruby or yq) --"
+  note "            staged YAML was NOT syntax checked"
+fi
+
+if [ "$fail" -ne 0 ]; then
+  printf '\ncommit aborted. override with: git commit --no-verify\n\n' >&2
+  exit 1
+fi
+
+exit 0

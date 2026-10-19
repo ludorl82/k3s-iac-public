@@ -1,0 +1,100 @@
+# Frigate NVR, migrated from a docker-compose-style container on encodeur.
+# Pinned to ONE host on purpose, luna since 2026-10-18 (ludotheque 2026-10-17, encodeur before):
+#   - its GPU (the host's RTX 3050: ONNX detector w/ TensorRT EP + NVDEC),
+#   - /home/ludorl82/opt/frigate holds config + ~78G of recordings on local
+#     disk, and the host's own side-cars (nixos-iac modules/frigate-host.nix:
+#     low-res feed, NAS backup, prune, recording watchdog cron) operate on
+#     those same host paths - hostPath keeps them working unchanged.
+# hostNetwork keeps 1984/5000/8554/8555 bound on the host's IP so the
+# recording watchdog (127.0.0.1:5000), HA and any RTSP/WebRTC consumers see
+# stable endpoints.
+# luna is NOT tainted (its game mode only cordons it, never drains):
+# the dedicated=frigate toleration below is a leftover from encodeur and
+# does nothing there.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frigate
+  namespace: frigate
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: frigate
+  template:
+    metadata:
+      labels:
+        app: frigate
+    spec:
+      # nvidia-cdi, not nvidia: the host is NixOS and only the CDI variant
+      # mounts the driver userspace. See frigate/runtimeclass.yaml.
+      runtimeClassName: nvidia-cdi
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: luna
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: frigate
+          effect: NoSchedule
+      containers:
+        - name: frigate
+          image: ghcr.io/blakeblackshear/frigate:0.18.0-tensorrt
+          env:
+            - name: FRIGATE_RTSP_USER
+              valueFrom: { secretKeyRef: { name: frigate-credentials, key: FRIGATE_RTSP_USER } }
+            - name: FRIGATE_RTSP_PASSWORD
+              valueFrom: { secretKeyRef: { name: frigate-credentials, key: FRIGATE_RTSP_PASSWORD } }
+            - name: PLUS_API_KEY
+              valueFrom: { secretKeyRef: { name: frigate-credentials, key: PLUS_API_KEY } }
+          ports:
+            - { name: api, containerPort: 5000 }
+            - { name: go2rtc, containerPort: 1984 }
+            - { name: rtsp, containerPort: 8554 }
+            - { name: webrtc-tcp, containerPort: 8555 }
+            - { name: webrtc-udp, containerPort: 8555, protocol: UDP }
+          livenessProbe:
+            httpGet:
+              path: /api/version
+              port: 5000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/version
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: media
+              mountPath: /media/frigate
+            - name: localtime
+              mountPath: /etc/localtime
+              readOnly: true
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: config
+          hostPath:
+            path: /home/ludorl82/opt/frigate/docker
+            type: Directory
+        - name: media
+          hostPath:
+            path: /home/ludorl82/opt/frigate/data
+            type: Directory
+        # The zone file itself, not /etc/localtime: the host runs in UTC
+        # (win11 follows its host's local time), Frigate must not.
+        - name: localtime
+          hostPath:
+            path: /etc/zoneinfo/America/Toronto
+            type: File
+        # matches the old docker shm_size: 512mb
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi

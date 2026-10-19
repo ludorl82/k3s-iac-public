@@ -1,0 +1,34 @@
+# *.lab.example from Let's Encrypt, into a NEW secret: wildcard-lab-example-le.
+#
+# The old secret wildcard-lab-example is NOT touched. Traefik still serves it,
+# through the "default" TLSStore in kube-system. Switching to this one is a
+# separate change, made once the real certificate is verified; rolling back
+# means putting the old name back.
+#
+# Same names as the old certificate, no more: *.lab.example only. That wildcard is
+# all that shows up in public Certificate Transparency logs; kuma, grafana and
+# the rest stay unknown to the outside.
+#
+# RSA 2048, like the old one, so client compatibility inside the lab does not
+# change.
+#
+# PRODUCTION issuer since 2026-09-23. The staging run came first and passed end
+# to end: DNS-01 record put at Cloudflare, propagation seen by the public
+# resolvers, validated, and the _acme-challenge record cleaned up afterwards.
+# Issued "(STAGING) Dastardly Durum YR1", CN/SAN *.lab.example, 89 days.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-lab-example-le
+  namespace: kube-system
+spec:
+  secretName: wildcard-lab-example-le
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  dnsNames:
+    - "*.lab.example"
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
